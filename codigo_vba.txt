@@ -1,0 +1,5 @@
+O codigo VBA foi movido para:
+
+D:\diegoluks\CONFERIR PONTO\docs\vba_importar_pontos.bas
+
+Esse arquivo passa a ser a versao canonica do macro de importacao.
