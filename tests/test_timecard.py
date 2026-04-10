@@ -20,6 +20,9 @@ class TimecardTests(unittest.TestCase):
         self.assertEqual(analysis.period_start.isoformat(), "2025-04-16")
         self.assertEqual(analysis.period_end.isoformat(), "2025-05-15")
         self.assertEqual(len(analysis.days), 30)
+        self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "07:45")
+        self.assertEqual(analysis.schedule.end.strftime("%H:%M"), "17:00")
+        self.assertEqual(sorted(analysis.schedule.working_weekdays), [0, 1, 2, 3, 4])
 
         self.assertEqual(len(analysis.included_days), 19)
 
@@ -41,6 +44,7 @@ class TimecardTests(unittest.TestCase):
 
         self.assertEqual(analysis.period_start.isoformat(), "2026-02-16")
         self.assertEqual(analysis.period_end.isoformat(), "2026-03-15")
+        self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "07:45")
         self.assertEqual(len(analysis.included_days), 8)
         self.assertEqual(len(analysis.issues), 0)
 
@@ -78,6 +82,8 @@ TB
         analysis = parse_timecard_pdf(pdf_path)
 
         december_13 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-12-13")
+        self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "08:00")
+        self.assertEqual(analysis.schedule.end.strftime("%H:%M"), "17:00")
         self.assertFalse(december_13.ignored)
         self.assertTrue(december_13.included_in_totals)
         self.assertEqual(december_13.status_code, "CO")
