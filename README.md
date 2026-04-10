@@ -1,11 +1,8 @@
-# Conferencia de Registro de Ponto
+# Agent IA Ponto
 
-Projeto reorganizado para manter separado o que e:
-
-- codigo fonte
-- arquivos de entrada
-- arquivos gerados
-- materiais antigos
+Aplicacao web moderna para processamento de registros de ponto a partir de PDFs.
+O projeto reaproveita a logica validada no fluxo anterior, mas agora entrega upload
+simples, apuracao automatica, destaque de inconsistencias e exportacao em planilha.
 
 ## Estrutura
 
@@ -15,30 +12,45 @@ CONFERIR PONTO/
 |   |-- inputs/        # PDFs recebidos
 |   |-- outputs/       # CSVs e planilhas geradas
 |   `-- templates/     # planilhas modelo
-|-- docs/              # VBA e instrucoes operacionais
+|-- docs/              # VBA e referencia do fluxo antigo
 |-- legacy/            # versoes antigas preservadas
 |-- scripts/           # pontos de entrada de execucao
 |-- src/               # regra de negocio Python
+|-- web/               # interface web
 |-- pdf_extractor.py   # atalho compativel com o fluxo antigo
 `-- requirements.txt
 ```
 
-## Fluxo do projeto
+## O que a aplicacao faz
 
-1. Coloque o PDF do cartao ponto em `data/inputs/`.
-2. Execute o extrator Python.
-3. O CSV sera gerado em `data/outputs/`.
-4. Importe o CSV na planilha Excel usando o macro em `docs/vba_importar_pontos.bas`.
+- upload de PDF pelo navegador
+- extracao automatica das batidas
+- calculo da jornada padrao `07:45-17:00`, com almoco `12:00-13:00`
+- separacao das horas extras antes e depois do almoco
+- ignorar sabados, domingos e feriados
+- destaque de dias inconsistentes
+- exportacao em `.xlsx`
 
-## Como executar
+## Como executar a aplicacao web
 
-### Opcao 1: manter o comando antigo
+```powershell
+py -m pip install -r requirements.txt
+py .\scripts\rodar_web.py
+```
+
+Depois abra:
+
+`http://127.0.0.1:8000`
+
+## Fluxo antigo em linha de comando
+
+### Manter o comando antigo
 
 ```powershell
 python .\pdf_extractor.py
 ```
 
-### Opcao 2: usar o script novo
+### Usar o script direto
 
 ```powershell
 python .\scripts\extrair_cartao_ponto.py
@@ -67,14 +79,13 @@ Esse script:
 
 Existe tambem um runner experimental por Excel/COM em [scripts/testar_macro_planilha.vbs](D:/diegoluks/CONFERIR%20PONTO/scripts/testar_macro_planilha.vbs), mas nesta maquina o Office esta rejeitando chamadas COM de forma intermitente.
 
-## Melhorias aplicadas
+## Regras implementadas
 
-- remocao de caminhos fixos em disco
-- remocao da logica hardcoded de mes e ano
-- parser centralizado em modulo reutilizavel
-- escrita de CSV sem depender de pandas
-- compatibilidade mantida com `pdf_extractor.py`
-- organizacao dos arquivos de exemplo e artefatos antigos
+- jornada esperada de `8h15` por dia util
+- calculo separado de extra antes do almoco e extra apos o almoco
+- atrasos e saidas antecipadas por comparacao com o horario padrao
+- exclusao de sabados, domingos, feriados nacionais e dias com status `FE`, `CO` e `RE`
+- identificacao de dias uteis sem batida ou com batidas insuficientes
 
 ## Observacoes sobre o ambiente
 

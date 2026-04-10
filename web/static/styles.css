@@ -1,0 +1,93 @@
+:root {
+  --bg: #f4efe6;
+  --panel: rgba(255, 251, 245, 0.88);
+  --ink: #1f2937;
+  --muted: #5b6470;
+  --accent: #b91c1c;
+  --accent-soft: #fee2e2;
+  --teal: #115e59;
+  --teal-soft: #ccfbf1;
+  --line: rgba(31, 41, 55, 0.12);
+  --warning: #92400e;
+  --warning-soft: #fef3c7;
+  --shadow: 0 24px 70px rgba(31, 41, 55, 0.12);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(17, 94, 89, 0.18), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(185, 28, 28, 0.16), transparent 35%),
+    linear-gradient(160deg, #faf5ee 0%, #efe2cf 100%);
+}
+.shell { width: min(1180px, calc(100vw - 32px)); margin: 0 auto; padding: 32px 0 48px; }
+.hero { display: grid; gap: 24px; grid-template-columns: 1.3fr 0.9fr; align-items: stretch; }
+.hero-copy, .upload-card, .panel {
+  background: var(--panel);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+.hero-copy { padding: 40px; }
+.eyebrow {
+  display: inline-block; padding: 6px 10px; border-radius: 999px;
+  background: rgba(17, 94, 89, 0.12); color: var(--teal); font-size: 12px;
+  font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.hero h1, .summary-header h2 { margin: 16px 0 12px; font-size: clamp(2rem, 3vw, 4rem); line-height: 0.95; }
+.hero p, #period-text, .status { color: var(--muted); font-size: 1rem; line-height: 1.6; }
+.hero-rules { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.hero-rules span, .pill, .status {
+  padding: 10px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.65); font-size: 0.9rem;
+}
+.upload-card { padding: 24px; display: flex; flex-direction: column; justify-content: center; }
+.dropzone {
+  display: grid; place-items: center; min-height: 280px; padding: 24px;
+  border: 2px dashed rgba(17, 94, 89, 0.28); border-radius: 24px;
+  background: linear-gradient(135deg, rgba(17, 94, 89, 0.08), rgba(255, 255, 255, 0.85)), #fff;
+  text-align: center; cursor: pointer;
+}
+.dropzone input { display: none; }
+.dropzone strong { font-size: 1.4rem; }
+.dropzone span { margin-top: 8px; color: var(--muted); }
+button, .export-link {
+  margin-top: 16px; padding: 16px 18px; border: 0; border-radius: 18px;
+  background: linear-gradient(135deg, #111827, #b91c1c); color: white; font: inherit;
+  font-weight: 700; text-decoration: none; text-align: center; cursor: pointer;
+}
+.status.loading { color: var(--teal); background: var(--teal-soft); }
+.status.error { color: var(--accent); background: var(--accent-soft); }
+.status.success { color: var(--teal); background: var(--teal-soft); }
+.hidden { display: none; }
+.results { margin-top: 28px; display: grid; gap: 20px; }
+.summary-header { display: flex; gap: 20px; justify-content: space-between; align-items: end; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 16px; }
+.metric { background: rgba(255, 255, 255, 0.78); border: 1px solid var(--line); border-radius: 22px; padding: 18px; }
+.metric span { display: block; color: var(--muted); font-size: 0.86rem; }
+.metric strong { display: block; margin-top: 8px; font-size: 1.6rem; }
+.panel { padding: 24px; }
+.panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.issues-list { display: grid; gap: 12px; }
+.issue-item { padding: 16px; border-radius: 18px; background: var(--warning-soft); border: 1px solid rgba(146, 64, 14, 0.18); }
+.issue-item strong { display: block; margin-bottom: 8px; }
+.table-wrap { overflow: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 14px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { font-size: 0.84rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+tr.ignored { background: rgba(148, 163, 184, 0.12); }
+tr.issue { background: rgba(254, 243, 199, 0.7); }
+.badge { display: inline-flex; padding: 6px 10px; border-radius: 999px; font-size: 0.8rem; font-weight: 700; }
+.badge.ok { background: var(--teal-soft); color: var(--teal); }
+.badge.warn { background: var(--warning-soft); color: var(--warning); }
+.badge.off { background: rgba(148, 163, 184, 0.16); color: #475569; }
+.pill.neutral { color: var(--muted); }
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; }
+  .summary-header { flex-direction: column; align-items: start; }
+}
