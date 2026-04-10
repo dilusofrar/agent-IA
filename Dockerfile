@@ -16,4 +16,4 @@ COPY README.md .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn ponto.web:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn web.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
