@@ -55,6 +55,8 @@ function renderPayload(payload) {
     ["Compensadas", payload.summary.compensated],
     ["Extra antes", payload.summary.overtimeBeforeLunch],
     ["Extra depois", payload.summary.overtimeAfterLunch],
+    ["Atrasos", payload.summary.late],
+    ["Saída antecipada", payload.summary.earlyLeave],
   ];
 
   summaryGridEl.innerHTML = cards.map(([label, value]) => `
@@ -75,11 +77,20 @@ function renderPayload(payload) {
   daysTableEl.innerHTML = payload.days.map((day) => {
     const rowClass = day.issues.length ? "issue" : day.ignored ? "ignored" : "";
     const badgeClass = day.issues.length ? "warn" : day.ignored ? "off" : "ok";
-    const alerts = day.issues.length
-      ? day.issues.join("<br/>")
-      : day.ignored
-        ? (day.ignoredReason || day.holidayName || "Dia fora da apuração")
-        : "Sem alertas";
+    const notes = [];
+    if (day.issues.length) {
+      notes.push(...day.issues);
+    }
+    if (day.ignored) {
+      notes.push(day.ignoredReason || day.holidayName || "Dia fora da apuração");
+    }
+    if (!day.ignored && day.late !== "00:00") {
+      notes.push(`Atraso de ${day.late}`);
+    }
+    if (!day.ignored && day.earlyLeave !== "00:00") {
+      notes.push(`Saída antecipada de ${day.earlyLeave}`);
+    }
+    const alerts = notes.length ? notes.join("<br/>") : "Sem alertas";
     return `
       <tr class="${rowClass}">
         <td>${formatDate(day.date)}<br/><small>${day.weekday}</small></td>
@@ -90,6 +101,8 @@ function renderPayload(payload) {
         <td>${day.balance}</td>
         <td>${day.overtimeBeforeLunch}</td>
         <td>${day.overtimeAfterLunch}</td>
+        <td>${day.late}</td>
+        <td>${day.earlyLeave}</td>
         <td>${alerts}</td>
       </tr>
     `;
