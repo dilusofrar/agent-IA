@@ -31,6 +31,8 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(payload["schedule"]["start"], "07:45")
         self.assertEqual(payload["schedule"]["end"], "17:00")
         self.assertIn("paidOvertime", payload["summary"])
+        self.assertIn("journeyCode", payload["days"][0])
+        self.assertIn("appliedSchedule", payload["days"][0])
         self.assertIn("reportId", payload)
 
     def test_export_endpoint_returns_pdf(self):

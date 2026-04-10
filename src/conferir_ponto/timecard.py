@@ -61,6 +61,8 @@ class RawPunchDay:
 class DayMetrics:
     work_date: date
     weekday_label: str
+    journey_code: str | None
+    applied_schedule_label: str
     status_code: str
     status_label: str
     first_entry: str | None
@@ -387,10 +389,12 @@ def calculate_day_metrics(
 
     if raw_day is None:
         if non_working_weekday or holiday_name:
-            return build_ignored_day(work_date, "NA", holiday_name)
+            return build_ignored_day(work_date, "NA", holiday_name, schedule=schedule)
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
+            journey_code=None,
+            applied_schedule_label=format_schedule_label(schedule),
             status_code="NA",
             status_label=STATUS_LABELS["NA"],
             first_entry=None,
@@ -414,14 +418,16 @@ def calculate_day_metrics(
     ignored_reason = detect_ignored_reason(raw_day)
     non_business_day = non_working_weekday or holiday_name or status_code in {"FE", "RE"}
     if ignored_reason:
-        return build_ignored_day(work_date, status_code, holiday_name, raw_day, ignored_reason)
+        return build_ignored_day(work_date, status_code, holiday_name, raw_day, ignored_reason, schedule)
     if (non_business_day or status_code == "CO") and not raw_day.entries:
-        return build_ignored_day(work_date, status_code, holiday_name, raw_day)
+        return build_ignored_day(work_date, status_code, holiday_name, raw_day, schedule=schedule)
 
     if len(raw_day.entries) < 2:
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
+            journey_code=raw_day.journey_code,
+            applied_schedule_label=format_schedule_label(schedule),
             status_code=status_code,
             status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
             first_entry=raw_day.entries[0] if raw_day.entries else None,
@@ -453,6 +459,8 @@ def calculate_day_metrics(
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
+            journey_code=raw_day.journey_code,
+            applied_schedule_label=format_schedule_label(schedule),
             status_code=status_code,
             status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
             first_entry=first_entry,
@@ -476,6 +484,7 @@ def calculate_day_metrics(
     if non_business_day or status_code == "CO":
         return build_non_business_workday(
             work_date=work_date,
+            journey_code=raw_day.journey_code,
             status_code=status_code,
             holiday_name=holiday_name,
             first_entry=first_entry,
@@ -503,6 +512,8 @@ def calculate_day_metrics(
     return DayMetrics(
         work_date=work_date,
         weekday_label=weekday_pt(work_date),
+        journey_code=raw_day.journey_code,
+        applied_schedule_label=format_schedule_label(schedule),
         status_code=status_code,
         status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
         first_entry=first_entry,
@@ -529,12 +540,15 @@ def build_ignored_day(
     holiday_name: str | None,
     raw_day: RawPunchDay | None = None,
     ignored_reason: str | None = None,
+    schedule: WorkSchedule | None = None,
 ) -> DayMetrics:
     first_entry = raw_day.entries[0] if raw_day and raw_day.entries else None
     last_exit = raw_day.entries[-1] if raw_day and raw_day.entries else None
     return DayMetrics(
         work_date=work_date,
         weekday_label=weekday_pt(work_date),
+        journey_code=raw_day.journey_code if raw_day else None,
+        applied_schedule_label=format_schedule_label(schedule) if schedule else "-",
         status_code=status_code,
         status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
         first_entry=first_entry,
@@ -557,6 +571,7 @@ def build_ignored_day(
 
 def build_non_business_workday(
     work_date: date,
+    journey_code: str | None,
     status_code: str,
     holiday_name: str | None,
     first_entry: str,
@@ -569,6 +584,8 @@ def build_non_business_workday(
     return DayMetrics(
         work_date=work_date,
         weekday_label=weekday_pt(work_date),
+        journey_code=journey_code,
+        applied_schedule_label=format_schedule_label(schedule),
         status_code=status_code,
         status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
         first_entry=first_entry,
@@ -766,6 +783,13 @@ def format_minutes(value: int) -> str:
     return f"{sign}{hours:02d}:{minutes:02d}"
 
 
+def format_schedule_label(schedule: WorkSchedule) -> str:
+    return (
+        f"{schedule.start.strftime('%H:%M')}-{schedule.lunch_start.strftime('%H:%M')} / "
+        f"{schedule.lunch_end.strftime('%H:%M')}-{schedule.end.strftime('%H:%M')}"
+    )
+
+
 def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
     included = analysis.included_days
     total_worked = sum(day.worked_minutes for day in included)
@@ -814,6 +838,8 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
             {
                 "date": day.work_date.isoformat(),
                 "weekday": day.weekday_label,
+                "journeyCode": day.journey_code,
+                "appliedSchedule": day.applied_schedule_label,
                 "statusCode": day.status_code,
                 "statusLabel": day.status_label,
                 "holidayName": day.holiday_name,
@@ -865,6 +891,8 @@ def export_analysis_to_xlsx(analysis: TimeCardAnalysis) -> bytes:
     headers = [
         "Data",
         "Dia",
+        "JRND",
+        "Jornada aplicada",
         "Status",
         "Feriado",
         "Entrada",
@@ -890,6 +918,8 @@ def export_analysis_to_xlsx(analysis: TimeCardAnalysis) -> bytes:
         row = [
             day.work_date.isoformat(),
             day.weekday_label,
+            day.journey_code,
+            day.applied_schedule_label,
             day.status_label,
             day.holiday_name,
             day.first_entry,
@@ -976,7 +1006,7 @@ def export_analysis_to_pdf(analysis: TimeCardAnalysis) -> bytes:
 
     details_rows = [[
         "Data", "Dia", "Status", "Entrada", "Saida", "Trabalhado", "Saldo",
-        "Extra antes", "Extra depois", "Extra paga", "Atraso", "Saida antecipada", "Observacoes"
+        "JRND", "Jornada", "Extra antes", "Extra depois", "Extra paga", "Atraso", "Saida antecipada", "Observacoes"
     ]]
     for day in payload["days"]:
         notes: list[str] = []
@@ -995,6 +1025,8 @@ def export_analysis_to_pdf(analysis: TimeCardAnalysis) -> bytes:
                 day["lastExit"] or "-",
                 day["worked"],
                 day["balance"],
+                day["journeyCode"] or "-",
+                day["appliedSchedule"],
                 day["overtimeBeforeLunch"],
                 day["overtimeAfterLunch"],
                 day["paidOvertime"],
@@ -1007,7 +1039,7 @@ def export_analysis_to_pdf(analysis: TimeCardAnalysis) -> bytes:
     details_table = Table(
         details_rows,
         repeatRows=1,
-        colWidths=[18 * mm, 12 * mm, 22 * mm, 16 * mm, 16 * mm, 18 * mm, 16 * mm, 18 * mm, 18 * mm, 18 * mm, 14 * mm, 20 * mm, 55 * mm],
+        colWidths=[16 * mm, 10 * mm, 20 * mm, 14 * mm, 14 * mm, 16 * mm, 14 * mm, 14 * mm, 28 * mm, 16 * mm, 16 * mm, 16 * mm, 12 * mm, 18 * mm, 45 * mm],
     )
     details_style = TableStyle(
         [

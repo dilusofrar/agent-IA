@@ -94,10 +94,14 @@ function renderPayload(payload) {
     if (!day.ignored && day.paidOvertime !== "00:00") {
       notes.push(`Hora extra paga de ${day.paidOvertime}`);
     }
+    notes.push(`JRND ${day.journeyCode || "-"}`);
+    notes.push(`Jornada aplicada ${day.appliedSchedule}`);
     const alerts = notes.length ? notes.join("<br/>") : "Sem alertas";
     return `
       <tr class="${rowClass}">
         <td>${formatDate(day.date)}<br/><small>${day.weekday}</small></td>
+        <td>${day.journeyCode || "-"}</td>
+        <td>${day.appliedSchedule}</td>
         <td><span class="badge ${badgeClass}">${day.statusLabel}</span></td>
         <td>${day.firstEntry || "-"}</td>
         <td>${day.lastExit || "-"}</td>
