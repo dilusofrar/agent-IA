@@ -11,7 +11,6 @@ from fastapi.staticfiles import StaticFiles
 from conferir_ponto.timecard import (
     build_summary_payload,
     export_analysis_to_pdf,
-    export_analysis_to_xlsx,
     parse_timecard_bytes,
 )
 
@@ -27,6 +26,11 @@ REPORTS: Dict[str, dict] = {}
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+
+@app.get("/healthz")
+async def healthcheck() -> JSONResponse:
+    return JSONResponse({"status": "ok"})
 
 
 @app.post("/api/process")

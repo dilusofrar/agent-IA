@@ -42,6 +42,27 @@ Depois abra:
 
 `http://127.0.0.1:8000`
 
+## Deploy
+
+O projeto esta pronto para deploy com Docker. Os arquivos principais sao:
+
+- `Dockerfile`
+- `.dockerignore`
+- `render.yaml`
+
+### Render
+
+1. Publique o repositorio no GitHub
+2. Acesse [render.com](https://render.com)
+3. Crie um novo `Blueprint` ou `Web Service`
+4. Conecte o repositorio `dilusofrar/agent-IA`
+5. Se usar `Blueprint`, o Render vai ler automaticamente o arquivo `render.yaml`
+6. Aguarde o build e abra a URL gerada
+
+O health check fica em:
+
+`/healthz`
+
 ## Fluxo antigo em linha de comando
 
 ### Manter o comando antigo

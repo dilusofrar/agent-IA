@@ -1,0 +1,11 @@
+.git
+.venv
+__pycache__
+*.pyc
+data
+legacy
+docs
+tests
+*.xlsm
+*.csv
+*.pdf

@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: agent-ia-ponto
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /healthz
