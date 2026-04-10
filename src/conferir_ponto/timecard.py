@@ -29,17 +29,13 @@ DAY_HEADER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 PUNCH_MARK_PATTERN = re.compile(r"(?P<time>\d{2}:\d{2})\s+(?:[odip])\b", re.IGNORECASE)
-JOURNEY_PATTERN = re.compile(
-    r"Jornada:\s*\d+\s*-\s*(?P<start>\d{2}:\d{2})\s+(?P<lunch_start>\d{2}:\d{2})\s+"
-    r"(?P<lunch_end>\d{2}:\d{2})\s+(?P<end>\d{2}:\d{2})",
+SCHEDULE_DEFINITION_PATTERN = re.compile(
+    r"^(?:Jornada:\s*)?(?P<code>\d+)\s*-\s*(?P<start>\d{2}:\d{2})\s+(?P<lunch_start>\d{2}:\d{2})\s+"
+    r"(?P<lunch_end>\d{2}:\d{2})\s+(?P<end>\d{2}:\d{2})$",
     re.IGNORECASE,
 )
+JOURNEY_CODE_PATTERN = re.compile(r"^\d{4}$")
 TURN_PATTERN = re.compile(r"(?P<line>\d{2}:\d{2}-\d{2}:\d{2}_.+)", re.IGNORECASE)
-
-OFFICIAL_START = time(7, 45)
-OFFICIAL_LUNCH_START = time(12, 0)
-OFFICIAL_LUNCH_END = time(13, 0)
-OFFICIAL_END = time(17, 0)
 
 DEFAULT_WORKING_WEEKDAYS = frozenset({0, 1, 2, 3, 4})
 
@@ -55,6 +51,7 @@ STATUS_LABELS = {
 @dataclass(frozen=True)
 class RawPunchDay:
     work_date: date
+    journey_code: str | None
     status_code: str
     entries: tuple[str, ...]
     block_lines: tuple[str, ...]
@@ -90,6 +87,8 @@ class WorkSchedule:
     lunch_end: time
     end: time
     working_weekdays: frozenset[int] = DEFAULT_WORKING_WEEKDAYS
+    count_overtime_before_start: bool = True
+    late_tolerance_minutes: int = 0
     source: str | None = None
 
     @property
@@ -158,7 +157,7 @@ def parse_timecard_bytes(content: bytes) -> TimeCardAnalysis:
 def parse_timecard_text(text: str) -> TimeCardAnalysis:
     period_start, period_end = extract_period_dates(text)
     employee_name = extract_employee_name(text)
-    schedule = extract_work_schedule(text)
+    schedule_map, schedule = extract_work_schedules(text)
     raw_days = parse_raw_days(text, period_start, period_end)
     day_map = {raw.work_date: raw for raw in raw_days}
 
@@ -169,7 +168,7 @@ def parse_timecard_text(text: str) -> TimeCardAnalysis:
         processed_at=datetime.now(),
         schedule=schedule,
         days=[
-            calculate_day_metrics(current_date, day_map.get(current_date), schedule)
+            calculate_day_metrics(current_date, day_map.get(current_date), schedule_map, schedule)
             for current_date in daterange(period_start, period_end)
         ],
     )
@@ -192,19 +191,44 @@ def extract_employee_name(text: str) -> str | None:
     return " ".join(match.group("name").split())
 
 
-def extract_work_schedule(text: str) -> WorkSchedule:
+def extract_work_schedules(text: str) -> tuple[dict[str, WorkSchedule], WorkSchedule]:
     working_weekdays = extract_working_weekdays(text)
     source_match = TURN_PATTERN.search(text)
     source = source_match.group("line") if source_match else None
+    schedule_map: dict[str, WorkSchedule] = {}
 
-    return WorkSchedule(
-        start=OFFICIAL_START,
-        lunch_start=OFFICIAL_LUNCH_START,
-        lunch_end=OFFICIAL_LUNCH_END,
-        end=OFFICIAL_END,
-        working_weekdays=working_weekdays,
-        source=source,
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        match = SCHEDULE_DEFINITION_PATTERN.match(line)
+        if not match:
+            continue
+        schedule_map[normalize_journey_code(match.group("code"))] = WorkSchedule(
+            start=parse_clock(match.group("start")),
+            lunch_start=parse_clock(match.group("lunch_start")),
+            lunch_end=parse_clock(match.group("lunch_end")),
+            end=parse_clock(match.group("end")),
+            working_weekdays=working_weekdays,
+            count_overtime_before_start=normalize_journey_code(match.group("code")) != "0004",
+            late_tolerance_minutes=5 if normalize_journey_code(match.group("code")) == "0004" else 0,
+            source=source,
+        )
+
+    default_schedule = (
+        schedule_map.get("0048")
+        or schedule_map.get("0004")
+        or next(iter(schedule_map.values()), None)
+        or WorkSchedule(
+            start=time(7, 45),
+            lunch_start=time(12, 0),
+            lunch_end=time(13, 0),
+            end=time(17, 0),
+            working_weekdays=working_weekdays,
+            count_overtime_before_start=True,
+            late_tolerance_minutes=0,
+            source=source,
+        )
     )
+    return schedule_map, default_schedule
 
 
 def extract_working_weekdays(text: str) -> frozenset[int]:
@@ -255,6 +279,7 @@ def parse_raw_days(text: str, period_start: date, period_end: date) -> list[RawP
         raw_days.append(
             RawPunchDay(
                 work_date=work_date,
+                journey_code=detect_journey_code(block_lines),
                 status_code=detect_status_code(block_lines),
                 entries=entries,
                 block_lines=tuple(block_lines),
@@ -271,6 +296,18 @@ def detect_status_code(block_lines: list[str]) -> str:
         if normalized in STATUS_LABELS:
             return normalized
     return "NA"
+
+
+def detect_journey_code(block_lines: list[str]) -> str | None:
+    for line in block_lines:
+        normalized = line.strip()
+        if JOURNEY_CODE_PATTERN.match(normalized):
+            return normalized
+    return None
+
+
+def normalize_journey_code(code: str) -> str:
+    return code.zfill(4)
 
 
 def extract_entries_from_block(block_lines: list[str]) -> tuple[str, ...]:
@@ -303,6 +340,16 @@ def detect_ignored_reason(raw_day: RawPunchDay) -> str | None:
     return None
 
 
+def resolve_schedule_for_day(
+    raw_day: RawPunchDay | None,
+    schedule_map: dict[str, WorkSchedule],
+    default_schedule: WorkSchedule,
+) -> WorkSchedule:
+    if raw_day is None or raw_day.journey_code is None:
+        return default_schedule
+    return schedule_map.get(normalize_journey_code(raw_day.journey_code), default_schedule)
+
+
 def build_period_day_lookup(start_date: date, end_date: date) -> dict[int, list[date]]:
     lookup: dict[int, list[date]] = {}
     current = start_date
@@ -328,7 +375,13 @@ def resolve_work_date(
     return candidates[-1]
 
 
-def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None, schedule: WorkSchedule) -> DayMetrics:
+def calculate_day_metrics(
+    work_date: date,
+    raw_day: RawPunchDay | None,
+    schedule_map: dict[str, WorkSchedule],
+    default_schedule: WorkSchedule,
+) -> DayMetrics:
+    schedule = resolve_schedule_for_day(raw_day, schedule_map, default_schedule)
     holiday_name = get_brazil_holiday_name(work_date)
     non_working_weekday = work_date.weekday() not in schedule.working_weekdays
 
@@ -434,9 +487,11 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None, schedule
 
     standard_start_dt = datetime.combine(work_date, schedule.start)
     standard_end_dt = datetime.combine(work_date, schedule.end)
-    overtime_before = max(0, minutes_between(start_dt, standard_start_dt))
+    raw_overtime_before = max(0, minutes_between(start_dt, standard_start_dt))
     overtime_after = max(0, minutes_between(standard_end_dt, end_dt))
-    late_minutes = max(0, minutes_between(standard_start_dt, start_dt))
+    raw_late_minutes = max(0, minutes_between(standard_start_dt, start_dt))
+    overtime_before = raw_overtime_before if schedule.count_overtime_before_start else 0
+    late_minutes = 0 if raw_late_minutes <= schedule.late_tolerance_minutes else raw_late_minutes
     early_leave_minutes = max(0, minutes_between(end_dt, standard_end_dt))
     balance_minutes = worked_minutes - schedule.expected_minutes
 

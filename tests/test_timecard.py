@@ -89,7 +89,7 @@ TB
         summary = build_summary_payload(analysis)["summary"]
 
         december_13 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-12-13")
-        self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "07:45")
+        self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "08:00")
         self.assertEqual(analysis.schedule.end.strftime("%H:%M"), "17:00")
         self.assertFalse(december_13.ignored)
         self.assertTrue(december_13.included_in_totals)
@@ -103,8 +103,27 @@ TB
 
         november_17 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-11-17")
         self.assertEqual(november_17.first_entry, "08:10")
-        self.assertEqual(format_minutes(november_17.late_minutes), "00:25")
+        self.assertEqual(format_minutes(november_17.late_minutes), "00:10")
         self.assertEqual(summary["paidOvertime"], "15:40")
+
+    def test_february_2026_mixes_normal_and_compensation_schedules(self):
+        pdf_path = PROJECT_ROOT / "data" / "inputs" / "fev2026.pdf"
+        analysis = parse_timecard_pdf(pdf_path)
+        summary = build_summary_payload(analysis)["summary"]
+
+        january_16 = next(day for day in analysis.days if day.work_date.isoformat() == "2026-01-16")
+        february_2 = next(day for day in analysis.days if day.work_date.isoformat() == "2026-02-02")
+        january_31 = next(day for day in analysis.days if day.work_date.isoformat() == "2026-01-31")
+
+        self.assertEqual(format_minutes(january_16.late_minutes), "00:00")
+        self.assertEqual(format_minutes(january_16.balance_minutes), "00:19")
+        self.assertEqual(format_minutes(next(day for day in analysis.days if day.work_date.isoformat() == "2026-01-21").late_minutes), "00:10")
+        self.assertEqual(format_minutes(february_2.late_minutes), "00:27")
+        self.assertEqual(format_minutes(january_31.payable_overtime_minutes), "01:00")
+        self.assertEqual(summary["positiveBank"], "13:50")
+        self.assertEqual(summary["negativeBank"], "06:55")
+        self.assertEqual(summary["balance"], "06:55")
+        self.assertEqual(summary["paidOvertime"], "01:00")
 
 
 if __name__ == "__main__":
