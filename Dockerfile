@@ -16,4 +16,6 @@ COPY README.md .
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn web.app:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Usa uvicorn diretamente para evitar divergencia com start commands externos
+# (por exemplo, configuracoes antigas apontando para modulos ASGI inexistentes).
+CMD ["sh", "-c", "uvicorn conferir_ponto.web:app --host 0.0.0.0 --port ${PORT:-8000}"]
