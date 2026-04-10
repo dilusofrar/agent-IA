@@ -82,7 +82,7 @@ TB
         analysis = parse_timecard_pdf(pdf_path)
 
         december_13 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-12-13")
-        self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "08:00")
+        self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "07:45")
         self.assertEqual(analysis.schedule.end.strftime("%H:%M"), "17:00")
         self.assertFalse(december_13.ignored)
         self.assertTrue(december_13.included_in_totals)
@@ -92,6 +92,10 @@ TB
         self.assertEqual(format_minutes(december_13.overtime_before_lunch_minutes), "04:12")
         self.assertEqual(format_minutes(december_13.overtime_after_lunch_minutes), "10:28")
         self.assertEqual(december_13.issues, [])
+
+        november_17 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-11-17")
+        self.assertEqual(november_17.first_entry, "08:10")
+        self.assertEqual(format_minutes(november_17.late_minutes), "00:25")
 
 
 if __name__ == "__main__":

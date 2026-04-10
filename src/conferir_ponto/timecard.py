@@ -31,6 +31,11 @@ JOURNEY_PATTERN = re.compile(
 )
 TURN_PATTERN = re.compile(r"(?P<line>\d{2}:\d{2}-\d{2}:\d{2}_.+)", re.IGNORECASE)
 
+OFFICIAL_START = time(7, 45)
+OFFICIAL_LUNCH_START = time(12, 0)
+OFFICIAL_LUNCH_END = time(13, 0)
+OFFICIAL_END = time(17, 0)
+
 DEFAULT_WORKING_WEEKDAYS = frozenset({0, 1, 2, 3, 4})
 
 STATUS_LABELS = {
@@ -182,27 +187,15 @@ def extract_employee_name(text: str) -> str | None:
 
 
 def extract_work_schedule(text: str) -> WorkSchedule:
-    journey_match = JOURNEY_PATTERN.search(text)
-    if journey_match:
-        start = parse_clock(journey_match.group("start"))
-        lunch_start = parse_clock(journey_match.group("lunch_start"))
-        lunch_end = parse_clock(journey_match.group("lunch_end"))
-        end = parse_clock(journey_match.group("end"))
-    else:
-        start = time(7, 45)
-        lunch_start = time(12, 0)
-        lunch_end = time(13, 0)
-        end = time(17, 0)
-
     working_weekdays = extract_working_weekdays(text)
     source_match = TURN_PATTERN.search(text)
     source = source_match.group("line") if source_match else None
 
     return WorkSchedule(
-        start=start,
-        lunch_start=lunch_start,
-        lunch_end=lunch_end,
-        end=end,
+        start=OFFICIAL_START,
+        lunch_start=OFFICIAL_LUNCH_START,
+        lunch_end=OFFICIAL_LUNCH_END,
+        end=OFFICIAL_END,
         working_weekdays=working_weekdays,
         source=source,
     )
