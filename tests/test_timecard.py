@@ -31,6 +31,20 @@ class TimecardTests(unittest.TestCase):
         may_1 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-05-01")
         self.assertTrue(may_1.ignored)
 
+    def test_vacation_days_are_ignored_without_inconsistencies(self):
+        pdf_path = PROJECT_ROOT / "data" / "inputs" / "marco2026.pdf"
+        analysis = parse_timecard_pdf(pdf_path)
+
+        self.assertEqual(analysis.period_start.isoformat(), "2026-02-16")
+        self.assertEqual(analysis.period_end.isoformat(), "2026-03-15")
+        self.assertEqual(len(analysis.included_days), 8)
+        self.assertEqual(len(analysis.issues), 0)
+
+        march_2 = next(day for day in analysis.days if day.work_date.isoformat() == "2026-03-02")
+        self.assertTrue(march_2.ignored)
+        self.assertEqual(march_2.ignored_reason, "Ferias")
+        self.assertEqual(march_2.issues, [])
+
 
 if __name__ == "__main__":
     unittest.main()
