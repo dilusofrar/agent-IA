@@ -295,9 +295,9 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
     status_code = raw_day.status_code
     ignored_reason = detect_ignored_reason(raw_day)
     non_business_day = weekend or holiday_name or status_code in {"FE", "RE"}
-    if ignored_reason or status_code == "CO":
+    if ignored_reason:
         return build_ignored_day(work_date, status_code, holiday_name, raw_day, ignored_reason)
-    if non_business_day and not raw_day.entries:
+    if (non_business_day or status_code == "CO") and not raw_day.entries:
         return build_ignored_day(work_date, status_code, holiday_name, raw_day)
 
     if len(raw_day.entries) < 2:
@@ -324,12 +324,13 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
 
     first_entry = raw_day.entries[0]
     last_exit = raw_day.entries[-1]
-    start_dt = combine(work_date, first_entry)
-    end_dt = combine(work_date, last_exit)
+    punch_datetimes = build_punch_datetimes(work_date, raw_day.entries)
+    start_dt = punch_datetimes[0]
+    end_dt = punch_datetimes[-1]
     issues: list[str] = []
 
-    if end_dt <= start_dt:
-        issues.append("Horario final menor ou igual ao horario inicial.")
+    if len(punch_datetimes) % 2 != 0:
+        issues.append("Quantidade impar de batidas, impossivel fechar os intervalos.")
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
@@ -351,8 +352,8 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
             issues=issues,
         )
 
-    worked_minutes = calculate_worked_minutes(start_dt, end_dt)
-    if non_business_day:
+    worked_minutes = calculate_paired_worked_minutes(punch_datetimes)
+    if non_business_day or status_code == "CO":
         return build_non_business_workday(
             work_date=work_date,
             status_code=status_code,
@@ -360,6 +361,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
             first_entry=first_entry,
             last_exit=last_exit,
             worked_minutes=worked_minutes,
+            punch_datetimes=punch_datetimes,
         )
 
     standard_start_dt = datetime.combine(work_date, STANDARD_START)
@@ -435,8 +437,9 @@ def build_non_business_workday(
     first_entry: str,
     last_exit: str,
     worked_minutes: int,
+    punch_datetimes: list[datetime],
 ) -> DayMetrics:
-    morning_minutes, afternoon_minutes = split_minutes_by_lunch(work_date, first_entry, last_exit)
+    morning_minutes, afternoon_minutes = split_paired_minutes_by_lunch(punch_datetimes)
     return DayMetrics(
         work_date=work_date,
         weekday_label=weekday_pt(work_date),
@@ -468,6 +471,16 @@ def split_minutes_by_lunch(work_date: date, first_entry: str, last_exit: str) ->
     return split_interval_by_lunch(combine(work_date, first_entry), combine(work_date, last_exit))
 
 
+def split_paired_minutes_by_lunch(punch_datetimes: list[datetime]) -> tuple[int, int]:
+    morning = 0
+    afternoon = 0
+    for start_dt, end_dt in pairwise_datetimes(punch_datetimes):
+        current_morning, current_afternoon = split_interval_by_lunch(start_dt, end_dt)
+        morning += current_morning
+        afternoon += current_afternoon
+    return morning, afternoon
+
+
 def split_interval_by_lunch(start_dt: datetime, end_dt: datetime) -> tuple[int, int]:
     lunch_start_dt = datetime.combine(start_dt.date(), LUNCH_START)
     lunch_end_dt = datetime.combine(start_dt.date(), LUNCH_END)
@@ -489,6 +502,38 @@ def overlap_minutes(start_a: datetime, end_a: datetime, start_b: datetime, end_b
 def combine(work_date: date, clock: str) -> datetime:
     hours, minutes = clock.split(":")
     return datetime.combine(work_date, time(int(hours), int(minutes)))
+
+
+def build_punch_datetimes(work_date: date, entries: tuple[str, ...]) -> list[datetime]:
+    datetimes: list[datetime] = []
+    current_day = work_date
+    previous_dt: datetime | None = None
+
+    for clock in entries:
+        current_dt = combine(current_day, clock)
+        if previous_dt is not None and current_dt <= previous_dt:
+            current_day += timedelta(days=1)
+            current_dt = combine(current_day, clock)
+        datetimes.append(current_dt)
+        previous_dt = current_dt
+
+    return datetimes
+
+
+def pairwise_datetimes(punch_datetimes: list[datetime]):
+    for index in range(0, len(punch_datetimes), 2):
+        if index + 1 >= len(punch_datetimes):
+            break
+        yield punch_datetimes[index], punch_datetimes[index + 1]
+
+
+def calculate_paired_worked_minutes(punch_datetimes: list[datetime]) -> int:
+    total = 0
+    for start_dt, end_dt in pairwise_datetimes(punch_datetimes):
+        if end_dt <= start_dt:
+            continue
+        total += int((end_dt - start_dt).total_seconds() // 60)
+    return total
 
 
 def minutes_between(start_dt: datetime, end_dt: datetime) -> int:

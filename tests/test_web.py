@@ -27,7 +27,7 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["summary"]["businessDaysProcessed"], 18)
+        self.assertEqual(payload["summary"]["businessDaysProcessed"], 19)
         self.assertIn("reportId", payload)
 
 

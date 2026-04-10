@@ -21,7 +21,7 @@ class TimecardTests(unittest.TestCase):
         self.assertEqual(analysis.period_end.isoformat(), "2025-05-15")
         self.assertEqual(len(analysis.days), 30)
 
-        self.assertEqual(len(analysis.included_days), 18)
+        self.assertEqual(len(analysis.included_days), 19)
 
         april_16 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-04-16")
         self.assertEqual(april_16.first_entry, "07:58")
@@ -30,6 +30,10 @@ class TimecardTests(unittest.TestCase):
 
         may_1 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-05-01")
         self.assertTrue(may_1.ignored)
+
+        april_26 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-04-26")
+        self.assertFalse(april_26.ignored)
+        self.assertEqual(format_minutes(april_26.worked_minutes), "03:58")
 
     def test_vacation_days_are_ignored_without_inconsistencies(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "marco2026.pdf"
@@ -68,6 +72,20 @@ TB
         self.assertEqual(format_minutes(sunday.overtime_before_lunch_minutes), "04:00")
         self.assertEqual(format_minutes(sunday.overtime_after_lunch_minutes), "04:00")
         self.assertEqual(sunday.issues, [])
+
+    def test_compensation_day_with_punches_is_counted(self):
+        pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"
+        analysis = parse_timecard_pdf(pdf_path)
+
+        december_13 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-12-13")
+        self.assertFalse(december_13.ignored)
+        self.assertTrue(december_13.included_in_totals)
+        self.assertEqual(december_13.status_code, "CO")
+        self.assertEqual(format_minutes(december_13.worked_minutes), "15:40")
+        self.assertEqual(format_minutes(december_13.balance_minutes), "15:40")
+        self.assertEqual(format_minutes(december_13.overtime_before_lunch_minutes), "04:12")
+        self.assertEqual(format_minutes(december_13.overtime_after_lunch_minutes), "10:28")
+        self.assertEqual(december_13.issues, [])
 
 
 if __name__ == "__main__":
