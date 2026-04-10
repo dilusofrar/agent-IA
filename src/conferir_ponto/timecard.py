@@ -68,6 +68,7 @@ class DayMetrics:
     balance_minutes: int
     overtime_before_lunch_minutes: int
     overtime_after_lunch_minutes: int
+    payable_overtime_minutes: int
     late_minutes: int
     early_leave_minutes: int
     ignored: bool
@@ -341,6 +342,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None, schedule
             balance_minutes=0,
             overtime_before_lunch_minutes=0,
             overtime_after_lunch_minutes=0,
+            payable_overtime_minutes=0,
             late_minutes=0,
             early_leave_minutes=0,
             ignored=False,
@@ -371,6 +373,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None, schedule
             balance_minutes=0,
             overtime_before_lunch_minutes=0,
             overtime_after_lunch_minutes=0,
+            payable_overtime_minutes=0,
             late_minutes=0,
             early_leave_minutes=0,
             ignored=False,
@@ -401,6 +404,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None, schedule
             balance_minutes=0,
             overtime_before_lunch_minutes=0,
             overtime_after_lunch_minutes=0,
+            payable_overtime_minutes=0,
             late_minutes=0,
             early_leave_minutes=0,
             ignored=False,
@@ -448,6 +452,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None, schedule
         balance_minutes=balance_minutes,
         overtime_before_lunch_minutes=overtime_before,
         overtime_after_lunch_minutes=overtime_after,
+        payable_overtime_minutes=0,
         late_minutes=late_minutes,
         early_leave_minutes=early_leave_minutes,
         ignored=False,
@@ -479,6 +484,7 @@ def build_ignored_day(
         balance_minutes=0,
         overtime_before_lunch_minutes=0,
         overtime_after_lunch_minutes=0,
+        payable_overtime_minutes=0,
         late_minutes=0,
         early_leave_minutes=0,
         ignored=True,
@@ -509,9 +515,10 @@ def build_non_business_workday(
         last_exit=last_exit,
         worked_minutes=worked_minutes,
         expected_minutes=0,
-        balance_minutes=worked_minutes,
+        balance_minutes=0,
         overtime_before_lunch_minutes=morning_minutes,
         overtime_after_lunch_minutes=afternoon_minutes,
+        payable_overtime_minutes=worked_minutes,
         late_minutes=0,
         early_leave_minutes=0,
         ignored=False,
@@ -703,13 +710,16 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
     included = analysis.included_days
     total_worked = sum(day.worked_minutes for day in included)
     total_expected = sum(day.expected_minutes for day in included)
-    total_balance = sum(day.balance_minutes for day in included)
-    total_overtime_before = sum(day.overtime_before_lunch_minutes for day in included)
-    total_overtime_after = sum(day.overtime_after_lunch_minutes for day in included)
+    bank_days = [day for day in included if day.expected_minutes > 0]
+    paid_overtime_days = [day for day in included if day.payable_overtime_minutes > 0]
+    total_balance = sum(day.balance_minutes for day in bank_days)
+    total_overtime_before = sum(day.overtime_before_lunch_minutes for day in bank_days)
+    total_overtime_after = sum(day.overtime_after_lunch_minutes for day in bank_days)
+    total_paid_overtime = sum(day.payable_overtime_minutes for day in paid_overtime_days)
     total_positive = total_overtime_before + total_overtime_after
-    total_negative = sum(day.late_minutes + day.early_leave_minutes for day in included)
-    total_late = sum(day.late_minutes for day in included)
-    total_early = sum(day.early_leave_minutes for day in included)
+    total_negative = sum(day.late_minutes + day.early_leave_minutes for day in bank_days)
+    total_late = sum(day.late_minutes for day in bank_days)
+    total_early = sum(day.early_leave_minutes for day in bank_days)
 
     return {
         "employeeName": analysis.employee_name,
@@ -734,6 +744,7 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
             "positiveBank": format_minutes(total_positive),
             "negativeBank": format_minutes(total_negative),
             "compensated": format_minutes(total_negative),
+            "paidOvertime": format_minutes(total_paid_overtime),
             "overtimeBeforeLunch": format_minutes(total_overtime_before),
             "overtimeAfterLunch": format_minutes(total_overtime_after),
             "late": format_minutes(total_late),
@@ -753,6 +764,7 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
                 "balance": format_minutes(day.balance_minutes),
                 "overtimeBeforeLunch": format_minutes(day.overtime_before_lunch_minutes),
                 "overtimeAfterLunch": format_minutes(day.overtime_after_lunch_minutes),
+                "paidOvertime": format_minutes(day.payable_overtime_minutes),
                 "late": format_minutes(day.late_minutes),
                 "earlyLeave": format_minutes(day.early_leave_minutes),
                 "ignored": day.ignored,
@@ -802,6 +814,7 @@ def export_analysis_to_xlsx(analysis: TimeCardAnalysis) -> bytes:
         "Saldo",
         "Extra antes almoco",
         "Extra apos almoco",
+        "Hora extra paga",
         "Atraso",
         "Saida antecipada",
         "Ignorado",
@@ -826,6 +839,7 @@ def export_analysis_to_xlsx(analysis: TimeCardAnalysis) -> bytes:
             format_minutes(day.balance_minutes),
             format_minutes(day.overtime_before_lunch_minutes),
             format_minutes(day.overtime_after_lunch_minutes),
+            format_minutes(day.payable_overtime_minutes),
             format_minutes(day.late_minutes),
             format_minutes(day.early_leave_minutes),
             "Sim" if day.ignored else "Nao",

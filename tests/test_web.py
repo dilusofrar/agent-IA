@@ -30,6 +30,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["businessDaysProcessed"], 19)
         self.assertEqual(payload["schedule"]["start"], "07:45")
         self.assertEqual(payload["schedule"]["end"], "17:00")
+        self.assertIn("paidOvertime", payload["summary"])
         self.assertIn("reportId", payload)
 
 

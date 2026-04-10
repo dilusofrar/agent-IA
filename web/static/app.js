@@ -53,6 +53,7 @@ function renderPayload(payload) {
     ["Banco positivo", payload.summary.positiveBank],
     ["Banco negativo", payload.summary.negativeBank],
     ["Compensadas", payload.summary.compensated],
+    ["Extras pagas", payload.summary.paidOvertime],
     ["Extra antes", payload.summary.overtimeBeforeLunch],
     ["Extra depois", payload.summary.overtimeAfterLunch],
     ["Atrasos", payload.summary.late],
@@ -90,6 +91,9 @@ function renderPayload(payload) {
     if (!day.ignored && day.earlyLeave !== "00:00") {
       notes.push(`Saída antecipada de ${day.earlyLeave}`);
     }
+    if (!day.ignored && day.paidOvertime !== "00:00") {
+      notes.push(`Hora extra paga de ${day.paidOvertime}`);
+    }
     const alerts = notes.length ? notes.join("<br/>") : "Sem alertas";
     return `
       <tr class="${rowClass}">
@@ -101,6 +105,7 @@ function renderPayload(payload) {
         <td>${day.balance}</td>
         <td>${day.overtimeBeforeLunch}</td>
         <td>${day.overtimeAfterLunch}</td>
+        <td>${day.paidOvertime}</td>
         <td>${day.late}</td>
         <td>${day.earlyLeave}</td>
         <td>${alerts}</td>

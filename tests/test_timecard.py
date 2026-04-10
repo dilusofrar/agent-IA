@@ -9,7 +9,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from conferir_ponto.timecard import format_minutes, parse_timecard_pdf, parse_timecard_text
+from conferir_ponto.timecard import build_summary_payload, format_minutes, parse_timecard_pdf, parse_timecard_text
 
 
 class TimecardTests(unittest.TestCase):
@@ -37,6 +37,8 @@ class TimecardTests(unittest.TestCase):
         april_26 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-04-26")
         self.assertFalse(april_26.ignored)
         self.assertEqual(format_minutes(april_26.worked_minutes), "03:58")
+        self.assertEqual(format_minutes(april_26.balance_minutes), "00:00")
+        self.assertEqual(format_minutes(april_26.payable_overtime_minutes), "03:58")
 
     def test_vacation_days_are_ignored_without_inconsistencies(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "marco2026.pdf"
@@ -68,18 +70,23 @@ TB
         analysis = parse_timecard_text(text)
 
         sunday = next(day for day in analysis.days if day.work_date.isoformat() == "2026-03-01")
+        summary = build_summary_payload(analysis)["summary"]
         self.assertFalse(sunday.ignored)
         self.assertTrue(sunday.included_in_totals)
         self.assertEqual(format_minutes(sunday.worked_minutes), "08:00")
         self.assertEqual(format_minutes(sunday.expected_minutes), "00:00")
-        self.assertEqual(format_minutes(sunday.balance_minutes), "08:00")
+        self.assertEqual(format_minutes(sunday.balance_minutes), "00:00")
+        self.assertEqual(format_minutes(sunday.payable_overtime_minutes), "08:00")
         self.assertEqual(format_minutes(sunday.overtime_before_lunch_minutes), "04:00")
         self.assertEqual(format_minutes(sunday.overtime_after_lunch_minutes), "04:00")
         self.assertEqual(sunday.issues, [])
+        self.assertEqual(summary["paidOvertime"], "08:00")
+        self.assertEqual(summary["positiveBank"], "00:00")
 
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"
         analysis = parse_timecard_pdf(pdf_path)
+        summary = build_summary_payload(analysis)["summary"]
 
         december_13 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-12-13")
         self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "07:45")
@@ -88,7 +95,8 @@ TB
         self.assertTrue(december_13.included_in_totals)
         self.assertEqual(december_13.status_code, "CO")
         self.assertEqual(format_minutes(december_13.worked_minutes), "15:40")
-        self.assertEqual(format_minutes(december_13.balance_minutes), "15:40")
+        self.assertEqual(format_minutes(december_13.balance_minutes), "00:00")
+        self.assertEqual(format_minutes(december_13.payable_overtime_minutes), "15:40")
         self.assertEqual(format_minutes(december_13.overtime_before_lunch_minutes), "04:12")
         self.assertEqual(format_minutes(december_13.overtime_after_lunch_minutes), "10:28")
         self.assertEqual(december_13.issues, [])
@@ -96,6 +104,7 @@ TB
         november_17 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-11-17")
         self.assertEqual(november_17.first_entry, "08:10")
         self.assertEqual(format_minutes(november_17.late_minutes), "00:25")
+        self.assertEqual(summary["paidOvertime"], "15:40")
 
 
 if __name__ == "__main__":
