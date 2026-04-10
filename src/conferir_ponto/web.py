@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from conferir_ponto.timecard import (
     build_summary_payload,
+    export_analysis_to_pdf,
     export_analysis_to_xlsx,
     parse_timecard_bytes,
 )
@@ -44,7 +45,7 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
     report_id = uuid4().hex
     REPORTS[report_id] = {
         "filename": file.filename,
-        "xlsx": export_analysis_to_xlsx(analysis),
+        "pdf": export_analysis_to_pdf(analysis),
     }
     payload["reportId"] = report_id
     return JSONResponse(payload)
@@ -58,9 +59,9 @@ async def export_report(report_id: str) -> Response:
 
     original_name = Path(report["filename"]).stem
     return Response(
-        content=report["xlsx"],
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content=report["pdf"],
+        media_type="application/pdf",
         headers={
-            "Content-Disposition": f'attachment; filename="{original_name}_apuracao.xlsx"'
+            "Content-Disposition": f'attachment; filename="{original_name}_apuracao.pdf"'
         },
     )

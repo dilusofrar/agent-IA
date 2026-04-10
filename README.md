@@ -2,7 +2,7 @@
 
 Aplicacao web moderna para processamento de registros de ponto a partir de PDFs.
 O projeto reaproveita a logica validada no fluxo anterior, mas agora entrega upload
-simples, apuracao automatica, destaque de inconsistencias e exportacao em planilha.
+simples, apuracao automatica, destaque de inconsistencias e exportacao em PDF.
 
 ## Estrutura
 
@@ -29,7 +29,7 @@ CONFERIR PONTO/
 - separacao das horas extras antes e depois do almoco
 - ignorar sabados, domingos e feriados
 - destaque de dias inconsistentes
-- exportacao em `.xlsx`
+- exportacao em `.pdf`
 
 ## Como executar a aplicacao web
 

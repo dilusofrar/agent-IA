@@ -33,6 +33,24 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("paidOvertime", payload["summary"])
         self.assertIn("reportId", payload)
 
+    def test_export_endpoint_returns_pdf(self):
+        pdf_path = PROJECT_ROOT / "data" / "inputs" / "DIEGO_LUCAS_SOARES_DE_FREITAS_ARAUJO.pdf"
+        client = TestClient(app)
+
+        with pdf_path.open("rb") as file:
+            process_response = client.post(
+                "/api/process",
+                files={"file": (pdf_path.name, file, "application/pdf")},
+            )
+
+        report_id = process_response.json()["reportId"]
+        export_response = client.get(f"/api/export/{report_id}")
+
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual(export_response.headers["content-type"], "application/pdf")
+        self.assertIn(".pdf", export_response.headers["content-disposition"])
+        self.assertTrue(export_response.content.startswith(b"%PDF"))
+
 
 if __name__ == "__main__":
     unittest.main()

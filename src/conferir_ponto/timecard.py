@@ -9,6 +9,11 @@ import re
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 PERIOD_PATTERN = re.compile(
@@ -867,6 +872,108 @@ def export_analysis_to_xlsx(analysis: TimeCardAnalysis) -> bytes:
 
     output = BytesIO()
     workbook.save(output)
+    return output.getvalue()
+
+
+def export_analysis_to_pdf(analysis: TimeCardAnalysis) -> bytes:
+    payload = build_summary_payload(analysis)
+    output = BytesIO()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=10 * mm,
+        bottomMargin=10 * mm,
+    )
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("Agent IA Ponto", styles["Title"]),
+        Paragraph(payload["employeeName"] or "Colaborador nao identificado", styles["Heading2"]),
+        Paragraph(
+            f"Periodo: {payload['periodStart']} ate {payload['periodEnd']} | Processado em {payload['processedAt']}",
+            styles["BodyText"],
+        ),
+        Spacer(1, 6),
+    ]
+
+    summary_table = Table(
+        [
+            ["Horas trabalhadas", payload["summary"]["worked"], "Horas previstas", payload["summary"]["expected"], "Saldo banco", payload["summary"]["balance"]],
+            ["Banco positivo", payload["summary"]["positiveBank"], "Banco negativo", payload["summary"]["negativeBank"], "Compensadas", payload["summary"]["compensated"]],
+            ["Extras pagas", payload["summary"]["paidOvertime"], "Extra antes", payload["summary"]["overtimeBeforeLunch"], "Extra depois", payload["summary"]["overtimeAfterLunch"]],
+            ["Atrasos", payload["summary"]["late"], "Saida antecipada", payload["summary"]["earlyLeave"], "Dias processados", str(payload["summary"]["businessDaysProcessed"])],
+        ],
+        colWidths=[32 * mm, 20 * mm, 32 * mm, 20 * mm, 32 * mm, 20 * mm],
+    )
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), colors.whitesmoke),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("PADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    story.extend([summary_table, Spacer(1, 8)])
+
+    details_rows = [[
+        "Data", "Dia", "Status", "Entrada", "Saida", "Trabalhado", "Saldo",
+        "Extra antes", "Extra depois", "Extra paga", "Atraso", "Saida antecipada", "Observacoes"
+    ]]
+    for day in payload["days"]:
+        notes: list[str] = []
+        if day["issues"]:
+            notes.extend(day["issues"])
+        if day["ignored"]:
+            notes.append(day["ignoredReason"] or day["holidayName"] or "Dia fora da apuracao")
+        if not day["ignored"] and day["paidOvertime"] != "00:00":
+            notes.append(f"Extra paga {day['paidOvertime']}")
+        details_rows.append(
+            [
+                day["date"],
+                day["weekday"],
+                day["statusLabel"],
+                day["firstEntry"] or "-",
+                day["lastExit"] or "-",
+                day["worked"],
+                day["balance"],
+                day["overtimeBeforeLunch"],
+                day["overtimeAfterLunch"],
+                day["paidOvertime"],
+                day["late"],
+                day["earlyLeave"],
+                " | ".join(notes) or "-",
+            ]
+        )
+
+    details_table = Table(
+        details_rows,
+        repeatRows=1,
+        colWidths=[18 * mm, 12 * mm, 22 * mm, 16 * mm, 16 * mm, 18 * mm, 16 * mm, 18 * mm, 18 * mm, 18 * mm, 14 * mm, 20 * mm, 55 * mm],
+    )
+    details_style = TableStyle(
+        [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("PADDING", (0, 0), (-1, -1), 4),
+        ]
+    )
+    for row_index, day in enumerate(payload["days"], start=1):
+        if day["ignored"]:
+            details_style.add("BACKGROUND", (0, row_index), (-1, row_index), colors.HexColor("#E2E8F0"))
+        elif day["issues"]:
+            details_style.add("BACKGROUND", (0, row_index), (-1, row_index), colors.HexColor("#FDE68A"))
+    details_table.setStyle(details_style)
+    story.append(details_table)
+
+    document.build(story)
     return output.getvalue()
 
 
