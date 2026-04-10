@@ -48,7 +48,54 @@ O projeto esta pronto para deploy com Docker. Os arquivos principais sao:
 
 - `Dockerfile`
 - `.dockerignore`
+- `docker-compose.yml`
 - `render.yaml`
+
+### Hostinger + Cloudflare Tunnel
+
+Se voce for usar VPS da Hostinger com DNS da Cloudflare e `cloudflared`, este e o caminho mais simples:
+
+1. Instale `docker` e `docker compose` no VPS
+2. Clone o repositorio no servidor
+3. Suba a aplicacao com:
+
+```bash
+docker compose up -d --build
+```
+
+4. Verifique se a aplicacao respondeu localmente:
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
+5. No `cloudflared`, aponte o tunnel para:
+
+```text
+http://127.0.0.1:8000
+```
+
+Exemplo de bloco no arquivo de configuracao do tunnel:
+
+```yaml
+ingress:
+  - hostname: ponto.seudominio.com.br
+    service: http://127.0.0.1:8000
+  - service: http_status:404
+```
+
+Com esse desenho:
+
+- a aplicacao nao fica exposta diretamente na internet
+- o acesso externo passa pela Cloudflare
+- o Docker publica apenas em `127.0.0.1:8000`
+
+Para atualizar depois:
+
+```bash
+git pull
+docker compose up -d --build
+```
 
 ### Render
 
