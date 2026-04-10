@@ -294,8 +294,11 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
 
     status_code = raw_day.status_code
     ignored_reason = detect_ignored_reason(raw_day)
-    if weekend or holiday_name or status_code in {"FE", "CO", "RE"} or ignored_reason:
+    non_business_day = weekend or holiday_name or status_code in {"FE", "RE"}
+    if ignored_reason or status_code == "CO":
         return build_ignored_day(work_date, status_code, holiday_name, raw_day, ignored_reason)
+    if non_business_day and not raw_day.entries:
+        return build_ignored_day(work_date, status_code, holiday_name, raw_day)
 
     if len(raw_day.entries) < 2:
         return DayMetrics(
@@ -349,6 +352,16 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
         )
 
     worked_minutes = calculate_worked_minutes(start_dt, end_dt)
+    if non_business_day:
+        return build_non_business_workday(
+            work_date=work_date,
+            status_code=status_code,
+            holiday_name=holiday_name,
+            first_entry=first_entry,
+            last_exit=last_exit,
+            worked_minutes=worked_minutes,
+        )
+
     standard_start_dt = datetime.combine(work_date, STANDARD_START)
     standard_end_dt = datetime.combine(work_date, STANDARD_END)
     overtime_before = max(0, minutes_between(start_dt, standard_start_dt))
@@ -415,14 +428,54 @@ def build_ignored_day(
     )
 
 
+def build_non_business_workday(
+    work_date: date,
+    status_code: str,
+    holiday_name: str | None,
+    first_entry: str,
+    last_exit: str,
+    worked_minutes: int,
+) -> DayMetrics:
+    morning_minutes, afternoon_minutes = split_minutes_by_lunch(work_date, first_entry, last_exit)
+    return DayMetrics(
+        work_date=work_date,
+        weekday_label=weekday_pt(work_date),
+        status_code=status_code,
+        status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
+        first_entry=first_entry,
+        last_exit=last_exit,
+        worked_minutes=worked_minutes,
+        expected_minutes=0,
+        balance_minutes=worked_minutes,
+        overtime_before_lunch_minutes=morning_minutes,
+        overtime_after_lunch_minutes=afternoon_minutes,
+        late_minutes=0,
+        early_leave_minutes=0,
+        ignored=False,
+        included_in_totals=True,
+        holiday_name=holiday_name,
+        ignored_reason=None,
+        issues=[],
+    )
+
+
 def calculate_worked_minutes(start_dt: datetime, end_dt: datetime) -> int:
+    morning, afternoon = split_interval_by_lunch(start_dt, end_dt)
+    return morning + afternoon
+
+
+def split_minutes_by_lunch(work_date: date, first_entry: str, last_exit: str) -> tuple[int, int]:
+    return split_interval_by_lunch(combine(work_date, first_entry), combine(work_date, last_exit))
+
+
+def split_interval_by_lunch(start_dt: datetime, end_dt: datetime) -> tuple[int, int]:
     lunch_start_dt = datetime.combine(start_dt.date(), LUNCH_START)
     lunch_end_dt = datetime.combine(start_dt.date(), LUNCH_END)
     day_start = start_dt.replace(hour=0, minute=0)
     day_end = end_dt.replace(hour=23, minute=59)
     morning = overlap_minutes(start_dt, end_dt, day_start, lunch_start_dt)
     afternoon = overlap_minutes(start_dt, end_dt, lunch_end_dt, day_end)
-    return morning + afternoon
+    return morning, afternoon
 
 
 def overlap_minutes(start_a: datetime, end_a: datetime, start_b: datetime, end_b: datetime) -> int:

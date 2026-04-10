@@ -9,7 +9,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from conferir_ponto.timecard import format_minutes, parse_timecard_pdf
+from conferir_ponto.timecard import format_minutes, parse_timecard_pdf, parse_timecard_text
 
 
 class TimecardTests(unittest.TestCase):
@@ -44,6 +44,30 @@ class TimecardTests(unittest.TestCase):
         self.assertTrue(march_2.ignored)
         self.assertEqual(march_2.ignored_reason, "Ferias")
         self.assertEqual(march_2.issues, [])
+
+    def test_weekend_work_is_counted_as_overtime(self):
+        text = """
+Início Ponto: 01/03/2026
+Fim Ponto: 02/03/2026
+Matrícula: 1 - 1 TESTE USUARIO
+01 Dom
+RE
+08:00 o 12:00 i 13:00 o 17:00 i
+02 Seg
+TB
+07:45 o 12:00 i 13:00 o 17:00 i
+"""
+        analysis = parse_timecard_text(text)
+
+        sunday = next(day for day in analysis.days if day.work_date.isoformat() == "2026-03-01")
+        self.assertFalse(sunday.ignored)
+        self.assertTrue(sunday.included_in_totals)
+        self.assertEqual(format_minutes(sunday.worked_minutes), "08:00")
+        self.assertEqual(format_minutes(sunday.expected_minutes), "00:00")
+        self.assertEqual(format_minutes(sunday.balance_minutes), "08:00")
+        self.assertEqual(format_minutes(sunday.overtime_before_lunch_minutes), "04:00")
+        self.assertEqual(format_minutes(sunday.overtime_after_lunch_minutes), "04:00")
+        self.assertEqual(sunday.issues, [])
 
 
 if __name__ == "__main__":
