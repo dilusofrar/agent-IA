@@ -50,10 +50,11 @@ function renderPayload(payload) {
     ["Horas trabalhadas", payload.summary.worked],
     ["Horas previstas", payload.summary.expected],
     ["Saldo", payload.summary.balance],
+    ["Banco positivo", payload.summary.positiveBank],
+    ["Banco negativo", payload.summary.negativeBank],
+    ["Compensadas", payload.summary.compensated],
     ["Extra antes", payload.summary.overtimeBeforeLunch],
     ["Extra depois", payload.summary.overtimeAfterLunch],
-    ["Atrasos", payload.summary.late],
-    ["Saída antecipada", payload.summary.earlyLeave],
   ];
 
   summaryGridEl.innerHTML = cards.map(([label, value]) => `
@@ -77,7 +78,7 @@ function renderPayload(payload) {
     const alerts = day.issues.length
       ? day.issues.join("<br/>")
       : day.ignored
-        ? (day.holidayName || "Dia fora da apuração")
+        ? (day.ignoredReason || day.holidayName || "Dia fora da apuração")
         : "Sem alertas";
     return `
       <tr class="${rowClass}">

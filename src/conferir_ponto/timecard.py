@@ -66,6 +66,7 @@ class DayMetrics:
     ignored: bool
     included_in_totals: bool
     holiday_name: str | None
+    ignored_reason: str | None = None
     issues: list[str] = field(default_factory=list)
 
 
@@ -227,6 +228,17 @@ def is_bridge_day(raw_day: RawPunchDay) -> bool:
     return False
 
 
+def detect_ignored_reason(raw_day: RawPunchDay) -> str | None:
+    block_text = " ".join(raw_day.block_lines).upper()
+    if "FERIAS" in block_text:
+        return "Ferias"
+    if "COMPENSACAO F_DIA" in block_text:
+        return "Compensacao de feriado"
+    if is_bridge_day(raw_day):
+        return "Dia ponte"
+    return None
+
+
 def build_period_day_lookup(start_date: date, end_date: date) -> dict[int, list[date]]:
     lookup: dict[int, list[date]] = {}
     current = start_date
@@ -276,12 +288,14 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
             ignored=False,
             included_in_totals=False,
             holiday_name=holiday_name,
+            ignored_reason=None,
             issues=["Dia util sem batidas registradas."],
         )
 
     status_code = raw_day.status_code
-    if weekend or holiday_name or status_code in {"FE", "CO", "RE"} or is_bridge_day(raw_day):
-        return build_ignored_day(work_date, status_code, holiday_name, raw_day)
+    ignored_reason = detect_ignored_reason(raw_day)
+    if weekend or holiday_name or status_code in {"FE", "CO", "RE"} or ignored_reason:
+        return build_ignored_day(work_date, status_code, holiday_name, raw_day, ignored_reason)
 
     if len(raw_day.entries) < 2:
         return DayMetrics(
@@ -301,6 +315,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
             ignored=False,
             included_in_totals=False,
             holiday_name=holiday_name,
+            ignored_reason=None,
             issues=["Quantidade insuficiente de batidas para calcular a jornada."],
         )
 
@@ -329,6 +344,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
             ignored=False,
             included_in_totals=False,
             holiday_name=holiday_name,
+            ignored_reason=None,
             issues=issues,
         )
 
@@ -363,6 +379,7 @@ def calculate_day_metrics(work_date: date, raw_day: RawPunchDay | None) -> DayMe
         ignored=False,
         included_in_totals=not issues,
         holiday_name=holiday_name,
+        ignored_reason=None,
         issues=issues,
     )
 
@@ -372,6 +389,7 @@ def build_ignored_day(
     status_code: str,
     holiday_name: str | None,
     raw_day: RawPunchDay | None = None,
+    ignored_reason: str | None = None,
 ) -> DayMetrics:
     first_entry = raw_day.entries[0] if raw_day and raw_day.entries else None
     last_exit = raw_day.entries[-1] if raw_day and raw_day.entries else None
@@ -392,6 +410,7 @@ def build_ignored_day(
         ignored=True,
         included_in_totals=False,
         holiday_name=holiday_name,
+        ignored_reason=ignored_reason,
         issues=[],
     )
 
@@ -488,6 +507,8 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
     total_balance = sum(day.balance_minutes for day in included)
     total_overtime_before = sum(day.overtime_before_lunch_minutes for day in included)
     total_overtime_after = sum(day.overtime_after_lunch_minutes for day in included)
+    total_positive = total_overtime_before + total_overtime_after
+    total_negative = sum(day.late_minutes + day.early_leave_minutes for day in included)
     total_late = sum(day.late_minutes for day in included)
     total_early = sum(day.early_leave_minutes for day in included)
 
@@ -503,6 +524,9 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
             "worked": format_minutes(total_worked),
             "expected": format_minutes(total_expected),
             "balance": format_minutes(total_balance),
+            "positiveBank": format_minutes(total_positive),
+            "negativeBank": format_minutes(total_negative),
+            "compensated": format_minutes(total_negative),
             "overtimeBeforeLunch": format_minutes(total_overtime_before),
             "overtimeAfterLunch": format_minutes(total_overtime_after),
             "late": format_minutes(total_late),
@@ -525,6 +549,7 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
                 "late": format_minutes(day.late_minutes),
                 "earlyLeave": format_minutes(day.early_leave_minutes),
                 "ignored": day.ignored,
+                "ignoredReason": day.ignored_reason,
                 "includedInTotals": day.included_in_totals,
                 "issues": day.issues,
             }
