@@ -7,7 +7,7 @@ simples, apuracao automatica, destaque de inconsistencias e exportacao em PDF.
 ## Estrutura
 
 ```text
-CONFERIR PONTO/
+agent-IA/
 |-- data/
 |   |-- inputs/        # PDFs recebidos
 |   |-- outputs/       # CSVs e planilhas geradas
@@ -25,9 +25,10 @@ CONFERIR PONTO/
 
 - upload de PDF pelo navegador
 - extracao automatica das batidas
-- calculo da jornada padrao `07:45-17:00`, com almoco `12:00-13:00`
+- leitura da jornada por codigo `JRND` diretamente do cartao
+- calculo automatico entre jornada normal e jornada de compensacao
 - separacao das horas extras antes e depois do almoco
-- ignorar sabados, domingos e feriados
+- classificacao de extras em folgas como `extra paga`
 - destaque de dias inconsistentes
 - exportacao em `.pdf`
 
@@ -145,14 +146,16 @@ Esse script:
 - salva o resultado em `data/outputs/HORAS_teste_macro.xlsm`
 - mostra algumas datas validadas com entrada e saida preenchidas
 
-Existe tambem um runner experimental por Excel/COM em [scripts/testar_macro_planilha.vbs](D:/diegoluks/CONFERIR%20PONTO/scripts/testar_macro_planilha.vbs), mas nesta maquina o Office esta rejeitando chamadas COM de forma intermitente.
+Existe tambem um runner experimental por Excel/COM em `scripts/testar_macro_planilha.vbs`, mas nesta maquina o Office esta rejeitando chamadas COM de forma intermitente.
 
 ## Regras implementadas
 
-- jornada esperada de `8h15` por dia util
+- leitura da jornada por codigo `JRND` no proprio espelho do ponto
+- suporte a meses com jornadas mistas, como `0004 = 08:00-17:00` e `0048 = 07:45-17:00`
 - calculo separado de extra antes do almoco e extra apos o almoco
-- atrasos e saidas antecipadas por comparacao com o horario padrao
-- exclusao de sabados, domingos, feriados nacionais e dias com status `FE`, `CO` e `RE`
+- atrasos e saidas antecipadas conforme a jornada aplicada naquele dia
+- horas em sabados, domingos, feriados e folgas com batida classificadas como `extra paga`
+- identificacao de feriados nacionais por calendario anual
 - identificacao de dias uteis sem batida ou com batidas insuficientes
 
 ## Observacoes sobre o ambiente

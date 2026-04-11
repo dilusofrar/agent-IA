@@ -85,6 +85,8 @@ TB
 
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"
+        if not pdf_path.exists():
+            self.skipTest("Fixture nov2025.pdf nao esta disponivel neste clone.")
         analysis = parse_timecard_pdf(pdf_path)
         summary = build_summary_payload(analysis)["summary"]
 
