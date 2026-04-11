@@ -60,22 +60,33 @@ function renderPayload(payload) {
     ["Saída antecipada", payload.summary.earlyLeave],
   ];
 
-  summaryGridEl.innerHTML = cards.map(([label, value]) => `
-    <article class="metric"><span>${label}</span><strong>${value}</strong></article>
-  `).join("");
+  summaryGridEl.replaceChildren(...cards.map(([label, value]) => {
+    const card = document.createElement("article");
+    card.className = "metric";
+
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+
+    const valueEl = document.createElement("strong");
+    valueEl.textContent = String(value);
+
+    card.append(labelEl, valueEl);
+    return card;
+  }));
 
   const issueDays = payload.days.filter((day) => day.issues.length);
   inconsistencyCountEl.textContent = String(issueDays.length);
-  issuesListEl.innerHTML = issueDays.length
-    ? issueDays.map((day) => `
-        <div class="issue-item">
-          <strong>${formatDate(day.date)} · ${day.statusLabel}</strong>
-          <div>${day.issues.join("<br/>")}</div>
-        </div>
-      `).join("")
-    : `<div class="issue-item"><strong>Nenhuma inconsistência crítica</strong><div>Os dias úteis com batidas completas foram processados sem alertas.</div></div>`;
+  issuesListEl.replaceChildren(...(issueDays.length
+    ? issueDays.map((day) => buildIssueItem(
+      `${formatDate(day.date)} · ${day.statusLabel}`,
+      day.issues,
+    ))
+    : [buildIssueItem(
+      "Nenhuma inconsistência crítica",
+      ["Os dias úteis com batidas completas foram processados sem alertas."],
+    )]));
 
-  daysTableEl.innerHTML = payload.days.map((day) => {
+  daysTableEl.replaceChildren(...payload.days.map((day) => {
     const rowClass = day.issues.length ? "issue" : day.ignored ? "ignored" : "";
     const badgeClass = day.issues.length ? "warn" : day.ignored ? "off" : "ok";
     const notes = [];
@@ -96,29 +107,86 @@ function renderPayload(payload) {
     }
     notes.push(`JRND ${day.journeyCode || "-"}`);
     notes.push(`Jornada aplicada ${day.appliedSchedule}`);
-    const alerts = notes.length ? notes.join("<br/>") : "Sem alertas";
-    return `
-      <tr class="${rowClass}">
-        <td>${formatDate(day.date)}<br/><small>${day.weekday}</small></td>
-        <td>${day.journeyCode || "-"}</td>
-        <td>${day.appliedSchedule}</td>
-        <td><span class="badge ${badgeClass}">${day.statusLabel}</span></td>
-        <td>${day.firstEntry || "-"}</td>
-        <td>${day.lastExit || "-"}</td>
-        <td>${day.worked}</td>
-        <td>${day.balance}</td>
-        <td>${day.overtimeBeforeLunch}</td>
-        <td>${day.overtimeAfterLunch}</td>
-        <td>${day.paidOvertime}</td>
-        <td>${day.late}</td>
-        <td>${day.earlyLeave}</td>
-        <td>${alerts}</td>
-      </tr>
-    `;
-  }).join("");
+    return buildDayRow(day, rowClass, badgeClass, notes.length ? notes : ["Sem alertas"]);
+  }));
 }
 
 function formatDate(isoDate) {
   const [year, month, day] = isoDate.split("-");
   return `${day}/${month}/${year}`;
+}
+
+function buildIssueItem(title, lines) {
+  const container = document.createElement("div");
+  container.className = "issue-item";
+
+  const titleEl = document.createElement("strong");
+  titleEl.textContent = title;
+
+  const detailsEl = createMultilineBlock(lines);
+  container.append(titleEl, detailsEl);
+  return container;
+}
+
+function buildDayRow(day, rowClass, badgeClass, notes) {
+  const row = document.createElement("tr");
+  if (rowClass) row.className = rowClass;
+
+  const dateCell = document.createElement("td");
+  dateCell.append(
+    document.createTextNode(formatDate(day.date)),
+    document.createElement("br"),
+    createSmallText(day.weekday),
+  );
+
+  const statusBadge = document.createElement("span");
+  statusBadge.className = `badge ${badgeClass}`;
+  statusBadge.textContent = day.statusLabel;
+
+  const statusCell = document.createElement("td");
+  statusCell.append(statusBadge);
+
+  const alertsCell = document.createElement("td");
+  alertsCell.append(createMultilineBlock(notes));
+
+  row.append(
+    dateCell,
+    createCell(day.journeyCode || "-"),
+    createCell(day.appliedSchedule),
+    statusCell,
+    createCell(day.firstEntry || "-"),
+    createCell(day.lastExit || "-"),
+    createCell(day.worked),
+    createCell(day.balance),
+    createCell(day.overtimeBeforeLunch),
+    createCell(day.overtimeAfterLunch),
+    createCell(day.paidOvertime),
+    createCell(day.late),
+    createCell(day.earlyLeave),
+    alertsCell,
+  );
+  return row;
+}
+
+function createCell(value) {
+  const cell = document.createElement("td");
+  cell.textContent = String(value);
+  return cell;
+}
+
+function createSmallText(value) {
+  const small = document.createElement("small");
+  small.textContent = value;
+  return small;
+}
+
+function createMultilineBlock(lines) {
+  const container = document.createElement("div");
+  lines.forEach((line, index) => {
+    if (index > 0) {
+      container.append(document.createElement("br"));
+    }
+    container.append(document.createTextNode(line));
+  });
+  return container;
 }

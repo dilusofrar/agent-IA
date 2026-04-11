@@ -14,6 +14,11 @@ COPY web ./web
 COPY scripts ./scripts
 COPY README.md .
 
+RUN adduser --disabled-password --gecos "" appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
+
 EXPOSE 8000
 
 # Usa uvicorn diretamente para evitar divergencia com start commands externos

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+import os
 from pathlib import Path
-from typing import Dict
+import re
+from typing import Any
 from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -17,10 +20,46 @@ from conferir_ponto.timecard import (
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 STATIC_DIR = BASE_DIR / "web" / "static"
-app = FastAPI(title="Agent IA Ponto", version="1.0.0")
+MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
+MAX_STORED_REPORTS = 32
+SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "").strip().lower() in {"1", "true", "yes", "on"}
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self' data:; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'"
+    ),
+}
+app = FastAPI(
+    title="Agent IA Ponto",
+    version="1.0.0",
+    docs_url="/docs" if ENABLE_API_DOCS else None,
+    redoc_url="/redoc" if ENABLE_API_DOCS else None,
+    openapi_url="/openapi.json" if ENABLE_API_DOCS else None,
+)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-REPORTS: Dict[str, dict] = {}
+REPORTS: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+
+@app.middleware("http")
+async def apply_security_headers(request: Request, call_next) -> Response:
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("Pragma", "no-cache")
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -38,7 +77,16 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Envie um arquivo PDF valido.")
 
-    content = await file.read()
+    try:
+        content = await file.read(MAX_UPLOAD_SIZE_BYTES + 1)
+    finally:
+        await file.close()
+
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail="O PDF excede o limite de 10 MB permitido para processamento.",
+        )
 
     try:
         analysis = parse_timecard_bytes(content)
@@ -47,6 +95,8 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
 
     payload = build_summary_payload(analysis)
     report_id = uuid4().hex
+    while len(REPORTS) >= MAX_STORED_REPORTS:
+        REPORTS.popitem(last=False)
     REPORTS[report_id] = {
         "filename": file.filename,
         "pdf": export_analysis_to_pdf(analysis),
@@ -61,7 +111,7 @@ async def export_report(report_id: str) -> Response:
     if report is None:
         raise HTTPException(status_code=404, detail="Relatorio nao encontrado.")
 
-    original_name = Path(report["filename"]).stem
+    original_name = sanitize_download_name(report["filename"])
     return Response(
         content=report["pdf"],
         media_type="application/pdf",
@@ -69,3 +119,8 @@ async def export_report(report_id: str) -> Response:
             "Content-Disposition": f'attachment; filename="{original_name}_apuracao.pdf"'
         },
     )
+
+
+def sanitize_download_name(filename: str) -> str:
+    sanitized = SAFE_DOWNLOAD_NAME.sub("_", Path(filename).stem).strip("._")
+    return sanitized or "relatorio"
