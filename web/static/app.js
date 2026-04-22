@@ -9,6 +9,13 @@ const issuesListEl = document.getElementById("issues-list");
 const daysTableEl = document.getElementById("days-table");
 const inconsistencyCountEl = document.getElementById("inconsistency-count");
 const exportLinkEl = document.getElementById("export-link");
+const dropzoneEl = document.querySelector(".dropzone");
+const dropzoneTitleEl = dropzoneEl.querySelector("strong");
+const dropzoneTextEl = dropzoneEl.querySelector("span");
+
+fileInput.addEventListener("change", () => {
+  syncSelectedFileState();
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -65,9 +72,11 @@ function renderPayload(payload) {
     card.className = "metric";
 
     const labelEl = document.createElement("span");
+    labelEl.className = "metric-label";
     labelEl.textContent = label;
 
     const valueEl = document.createElement("strong");
+    valueEl.className = "metric-value";
     valueEl.textContent = String(value);
 
     card.append(labelEl, valueEl);
@@ -119,6 +128,9 @@ function formatDate(isoDate) {
 function buildIssueItem(title, lines) {
   const container = document.createElement("div");
   container.className = "issue-item";
+  if (title === "Nenhuma inconsistência crítica") {
+    container.classList.add("safe");
+  }
 
   const titleEl = document.createElement("strong");
   titleEl.textContent = title;
@@ -133,9 +145,12 @@ function buildDayRow(day, rowClass, badgeClass, notes) {
   if (rowClass) row.className = rowClass;
 
   const dateCell = document.createElement("td");
+  const dateMain = document.createElement("span");
+  dateMain.className = "day-date";
+  dateMain.textContent = formatDate(day.date);
+
   dateCell.append(
-    document.createTextNode(formatDate(day.date)),
-    document.createElement("br"),
+    dateMain,
     createSmallText(day.weekday),
   );
 
@@ -147,6 +162,7 @@ function buildDayRow(day, rowClass, badgeClass, notes) {
   statusCell.append(statusBadge);
 
   const alertsCell = document.createElement("td");
+  alertsCell.className = "alerts-cell";
   alertsCell.append(createMultilineBlock(notes));
 
   row.append(
@@ -176,17 +192,31 @@ function createCell(value) {
 
 function createSmallText(value) {
   const small = document.createElement("small");
+  small.className = "day-weekday";
   small.textContent = value;
   return small;
 }
 
 function createMultilineBlock(lines) {
-  const container = document.createElement("div");
+  const container = document.createElement("ul");
+  container.className = "note-list compact";
   lines.forEach((line, index) => {
-    if (index > 0) {
-      container.append(document.createElement("br"));
-    }
-    container.append(document.createTextNode(line));
+    const item = document.createElement("li");
+    item.textContent = line;
+    item.dataset.index = String(index);
+    container.append(item);
   });
   return container;
+}
+
+function syncSelectedFileState() {
+  const selectedFile = fileInput.files?.[0];
+  if (!selectedFile) {
+    dropzoneTitleEl.textContent = "Solte o PDF aqui";
+    dropzoneTextEl.textContent = "ou clique para selecionar o arquivo";
+    return;
+  }
+
+  dropzoneTitleEl.textContent = selectedFile.name;
+  dropzoneTextEl.textContent = `${(selectedFile.size / 1024).toFixed(1)} KB · clique para trocar o arquivo`;
 }

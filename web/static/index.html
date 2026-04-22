@@ -7,11 +7,32 @@
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <div class="page-glow page-glow-left"></div>
+    <div class="page-glow page-glow-right"></div>
+
     <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">AI</div>
+          <div>
+            <p class="brand-kicker">Agent IA</p>
+            <p class="brand-name">Ponto Inteligente</p>
+          </div>
+        </div>
+        <span class="topbar-status">
+          <span class="live-dot"></span>
+          Sistema online
+        </span>
+      </header>
+
       <section class="hero">
-        <div class="hero-copy">
-          <span class="eyebrow">Agent IA Ponto</span>
-          <h1>Processamento moderno de registros de ponto em PDF</h1>
+        <article class="hero-copy surface">
+          <span class="eyebrow">Apuração automatizada</span>
+          <h1>
+            Processamento moderno de
+            <span class="hero-highlight">cartão ponto</span>
+            em PDF
+          </h1>
           <p>
             Envie o cartão ponto, extraia as batidas automaticamente e receba a
             apuração da jornada com banco de horas, extras pagas, atrasos,
@@ -22,24 +43,26 @@
             <span>Almoço 12:00-13:00</span>
             <span>Folga com ponto = extra paga</span>
           </div>
-        </div>
-        <div class="upload-card">
-          <form id="upload-form">
+        </article>
+
+        <aside class="upload-card surface">
+          <form id="upload-form" class="upload-form">
             <label class="dropzone" for="pdf-file">
               <input id="pdf-file" name="file" type="file" accept=".pdf" />
+              <div class="dropzone-icon">PDF</div>
               <strong>Solte o PDF aqui</strong>
               <span>ou clique para selecionar o arquivo</span>
             </label>
             <button id="submit-button" type="submit">Processar arquivo</button>
           </form>
           <p id="status" class="status idle">Aguardando PDF.</p>
-        </div>
+        </aside>
       </section>
 
       <section id="results" class="results hidden">
         <div class="summary-header">
-          <div>
-            <span class="eyebrow">Resultado da apuração</span>
+          <div class="summary-copy">
+            <span class="eyebrow success">Resultado da apuração</span>
             <h2 id="employee-name">Colaborador</h2>
             <p id="period-text"></p>
           </div>
@@ -48,21 +71,21 @@
 
         <div id="summary-grid" class="summary-grid"></div>
 
-        <div class="panel">
+        <section class="panel surface">
           <div class="panel-heading">
             <h3>Inconsistências</h3>
-            <span id="inconsistency-count" class="pill">0</span>
+            <span id="inconsistency-count" class="pill warning">0</span>
           </div>
           <div id="issues-list" class="issues-list"></div>
-        </div>
+        </section>
 
-        <div class="panel daily-detail-panel">
+        <section class="panel surface daily-detail-panel">
           <div class="panel-heading">
             <h3>Detalhamento diário</h3>
             <span class="pill neutral">Dias do período</span>
           </div>
           <div class="table-wrap">
-            <table>
+            <table class="data-table">
               <thead>
                 <tr>
                   <th>Data</th>
@@ -84,7 +107,7 @@
               <tbody id="days-table"></tbody>
             </table>
           </div>
-        </div>
+        </section>
       </section>
     </main>
 
