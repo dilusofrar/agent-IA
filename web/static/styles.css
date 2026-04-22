@@ -260,6 +260,11 @@ body {
   transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
 }
 
+.dropzone.has-file {
+  align-content: center;
+  gap: 4px;
+}
+
 .dropzone:hover {
   transform: translateY(-1px);
   border-color: rgba(104, 87, 255, 0.45);
@@ -286,12 +291,30 @@ body {
 }
 
 .dropzone strong {
-  font-size: 1.35rem;
+  max-width: min(100%, 26ch);
+  font-size: clamp(1.15rem, 2.2vw, 1.35rem);
+  line-height: 1.25;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .dropzone span {
+  max-width: min(100%, 32ch);
   margin-top: 8px;
   color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.dropzone.has-file strong {
+  max-width: 100%;
+  font-size: clamp(1rem, 1.7vw, 1.2rem);
+}
+
+.dropzone.has-file span {
+  max-width: 100%;
+  font-size: 0.95rem;
 }
 
 button,
@@ -644,6 +667,7 @@ small {
 
   .dropzone {
     min-height: 240px;
+    padding: 22px;
   }
 
   .table-wrap {

@@ -212,11 +212,13 @@ function createMultilineBlock(lines) {
 function syncSelectedFileState() {
   const selectedFile = fileInput.files?.[0];
   if (!selectedFile) {
+    dropzoneEl.classList.remove("has-file");
     dropzoneTitleEl.textContent = "Solte o PDF aqui";
     dropzoneTextEl.textContent = "ou clique para selecionar o arquivo";
     return;
   }
 
+  dropzoneEl.classList.add("has-file");
   dropzoneTitleEl.textContent = selectedFile.name;
   dropzoneTextEl.textContent = `${(selectedFile.size / 1024).toFixed(1)} KB · clique para trocar o arquivo`;
 }
