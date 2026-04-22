@@ -528,7 +528,7 @@ button:active,
 
 .data-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 1320px;
   border-collapse: separate;
   border-spacing: 0;
 }
@@ -552,6 +552,58 @@ th {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: inset 0 -1px 0 var(--line-strong), 0 8px 20px rgba(17, 24, 39, 0.05);
+}
+
+.data-table th:nth-child(1),
+.data-table td:nth-child(1) {
+  min-width: 132px;
+}
+
+.data-table th:nth-child(2),
+.data-table td:nth-child(2) {
+  min-width: 86px;
+}
+
+.data-table th:nth-child(3),
+.data-table td:nth-child(3) {
+  min-width: 210px;
+}
+
+.data-table th:nth-child(4),
+.data-table td:nth-child(4) {
+  min-width: 138px;
+}
+
+.data-table th:nth-child(5),
+.data-table td:nth-child(5),
+.data-table th:nth-child(6),
+.data-table td:nth-child(6) {
+  min-width: 92px;
+}
+
+.data-table th:nth-child(7),
+.data-table td:nth-child(7),
+.data-table th:nth-child(8),
+.data-table td:nth-child(8),
+.data-table th:nth-child(9),
+.data-table td:nth-child(9),
+.data-table th:nth-child(10),
+.data-table td:nth-child(10),
+.data-table th:nth-child(11),
+.data-table td:nth-child(11),
+.data-table th:nth-child(12),
+.data-table td:nth-child(12) {
+  min-width: 108px;
+}
+
+.data-table th:nth-child(13),
+.data-table td:nth-child(13) {
+  min-width: 150px;
+}
+
+.data-table th:nth-child(14),
+.data-table td:nth-child(14) {
+  min-width: 340px;
 }
 
 .data-table tr:hover td {
@@ -603,7 +655,7 @@ th {
 }
 
 .alerts-cell {
-  min-width: 280px;
+  min-width: 340px;
 }
 
 small {
