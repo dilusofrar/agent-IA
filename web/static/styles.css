@@ -76,24 +76,11 @@ button, .export-link {
 .issues-list { display: grid; gap: 12px; }
 .issue-item { padding: 16px; border-radius: 18px; background: var(--warning-soft); border: 1px solid rgba(146, 64, 14, 0.18); }
 .issue-item strong { display: block; margin-bottom: 8px; }
-.daily-detail-panel {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  max-height: min(72vh, 780px);
-  overflow: hidden;
-}
-.daily-detail-panel .panel-heading {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  margin: -24px -24px 0;
-  padding: 24px 24px 16px;
-  background: rgba(255, 251, 245, 0.96);
-  backdrop-filter: blur(18px);
-}
+.daily-detail-panel { overflow: hidden; }
 .table-wrap {
-  overflow: auto;
-  min-height: 0;
+  max-height: 560px;
+  overflow-x: auto;
+  overflow-y: auto;
   padding-bottom: 4px;
 }
 table { width: 100%; border-collapse: separate; border-spacing: 0; }
@@ -119,9 +106,5 @@ tr.issue { background: rgba(254, 243, 199, 0.7); }
 @media (max-width: 900px) {
   .hero { grid-template-columns: 1fr; }
   .summary-header { flex-direction: column; align-items: start; }
-  .daily-detail-panel { max-height: min(68vh, 640px); }
-  .daily-detail-panel .panel-heading {
-    align-items: flex-start;
-    gap: 12px;
-  }
+  .table-wrap { max-height: 62vh; }
 }
