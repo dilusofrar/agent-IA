@@ -185,7 +185,7 @@ class WebAppTests(unittest.TestCase):
             reports_dir = Path(temp_dir)
             report_id = "persisted-report"
             reports_dir.joinpath(f"{report_id}.json").write_text(
-                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report","filename":"persisted.pdf","createdAt":"2026-04-23T10:00:00","summary":{"balance":"00:00","inconsistencyCount":0,"paidOvertime":"00:00","businessDaysProcessed":1},"diagnostics":{}}}',
+                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report","filename":"persisted.pdf","createdAt":"2026-04-23T10:00:00","summary":{"balance":"00:00","inconsistencyCount":0,"paidOvertime":"00:00","businessDaysProcessed":1},"diagnostics":{}},"payload":{"reportId":"persisted-report","employeeName":"Persistido"}}',
                 encoding="utf-8",
             )
             reports_dir.joinpath(f"{report_id}.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
@@ -197,6 +197,26 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "application/pdf")
         self.assertIn("persisted_apuracao.pdf", response.headers["content-disposition"])
         self.assertTrue(response.content.startswith(b"%PDF"))
+
+    def test_report_details_endpoint_returns_persisted_payload(self):
+        client = TestClient(app)
+        with TemporaryDirectory() as temp_dir:
+            reports_dir = Path(temp_dir)
+            report_id = "persisted-report"
+            reports_dir.joinpath(f"{report_id}.json").write_text(
+                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report"},"payload":{"reportId":"persisted-report","employeeName":"Persistido","summary":{"businessDaysProcessed":3}}}',
+                encoding="utf-8",
+            )
+            reports_dir.joinpath(f"{report_id}.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
+
+            with patch("conferir_ponto.web.REPORTS_DIR", reports_dir):
+                response = client.get(f"/api/reports/{report_id}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["reportId"], "persisted-report")
+        self.assertEqual(payload["employeeName"], "Persistido")
+        self.assertEqual(payload["summary"]["businessDaysProcessed"], 3)
 
     def test_report_cache_discards_oldest_entry_when_limit_is_reached(self):
         client = TestClient(app)
@@ -255,9 +275,13 @@ class WebAppTests(unittest.TestCase):
             )
 
             self.assertEqual(response.status_code, 200)
-            report_id = response.json()["reportId"]
-            self.assertTrue(Path(temp_dir, f"{report_id}.json").exists())
+            response_payload = response.json()
+            report_id = response_payload["reportId"]
+            persisted_metadata = Path(temp_dir, f"{report_id}.json")
+            self.assertTrue(persisted_metadata.exists())
             self.assertTrue(Path(temp_dir, f"{report_id}.pdf").exists())
+            self.assertIn('"payload"', persisted_metadata.read_text(encoding="utf-8"))
+            self.assertIn(response_payload["reportId"], persisted_metadata.read_text(encoding="utf-8"))
 
 
 class WebHelpersTests(unittest.TestCase):

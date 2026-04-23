@@ -86,6 +86,16 @@ async def recent_reports() -> JSONResponse:
     return JSONResponse({"items": items, "count": len(items)})
 
 
+@app.get("/api/reports/{report_id}")
+async def report_details(report_id: str) -> JSONResponse:
+    report = REPORTS.get(report_id)
+    if report is None:
+        report = load_report_from_disk(report_id)
+    if report is None or "payload" not in report:
+        raise HTTPException(status_code=404, detail="Relatorio nao encontrado.")
+    return JSONResponse(report["payload"])
+
+
 @app.post("/api/process")
 async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -134,6 +144,7 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
         "filename": file.filename,
         "pdf": export_analysis_to_pdf(analysis),
         "recent": build_recent_report_item(report_id, file.filename, payload),
+        "payload": payload,
     }
     persist_report(report_id, REPORTS[report_id])
     prune_persisted_reports()
@@ -213,6 +224,7 @@ def persist_report(report_id: str, report: dict[str, Any]) -> None:
         "reportId": report_id,
         "filename": report["filename"],
         "recent": report.get("recent", {}),
+        "payload": report.get("payload", {}),
     }
     metadata_path_for(report_id).write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2),
@@ -232,6 +244,7 @@ def load_report_from_disk(report_id: str) -> dict[str, Any] | None:
         "filename": metadata.get("filename", f"{report_id}.pdf"),
         "pdf": pdf_path.read_bytes(),
         "recent": metadata.get("recent", {}),
+        "payload": metadata.get("payload", {}),
     }
     REPORTS[report_id] = report
     return report

@@ -254,6 +254,10 @@
   }
 
   function renderResults(payload) {
+    renderPayload(payload, true);
+  }
+
+  function renderPayload(payload, shouldScroll) {
     state.payload = payload;
     state.filter = "all";
     state.query = "";
@@ -278,7 +282,9 @@
     renderExportLink(payload.reportId);
 
     resultsEl.hidden = false;
-    resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (shouldScroll) {
+      resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   function renderSummary(summary) {
@@ -487,6 +493,16 @@
     );
 
     const actions = createElement("div", { className: "recent-item-actions" });
+    const openButton = createElement("button", {
+      className: "btn btn-secondary",
+      text: "Abrir resultado",
+      attrs: {
+        type: "button",
+      },
+    });
+    openButton.addEventListener("click", function () {
+      loadReportFromHistory(item.reportId);
+    });
     const exportButton = createElement("a", {
       className: "btn btn-secondary",
       text: "Exportar PDF",
@@ -494,10 +510,30 @@
         href: "/api/export/" + encodeURIComponent(item.reportId || ""),
       },
     });
-    actions.appendChild(exportButton);
+    actions.append(openButton, exportButton);
 
     wrap.append(head, meta, metrics, actions);
     return wrap;
+  }
+
+  async function loadReportFromHistory(reportId) {
+    if (!reportId) {
+      return;
+    }
+
+    setStatus("loading", "Carregando apuração salva…");
+    try {
+      const response = await fetch("/api/reports/" + encodeURIComponent(reportId), { method: "GET" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Não foi possível reabrir o relatório.");
+      }
+      renderPayload(payload, true);
+      setStatus("success", "Apuração carregada a partir do histórico.");
+    } catch (error) {
+      console.error(error);
+      setStatus("error", error && error.message ? error.message : "Falha ao carregar o histórico.");
+    }
   }
 
   function renderDay(day) {
