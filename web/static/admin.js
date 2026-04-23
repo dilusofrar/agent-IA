@@ -7,6 +7,7 @@
   const settingsStatus = document.getElementById("admin-settings-status");
   const logoutButton = document.getElementById("admin-logout");
   const summaryGrid = document.getElementById("admin-settings-summary");
+  const historyList = document.getElementById("admin-settings-history");
   const jsonPreview = document.getElementById("admin-settings-json");
 
   if (loginForm) {
@@ -48,13 +49,22 @@
   async function loadSettings() {
     setStatus(settingsStatus, "loading", "Carregando regras persistentes…");
     try {
-      const response = await fetch("/api/settings", { method: "GET" });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.detail || "Falha ao carregar regras.");
+      const responses = await Promise.all([
+        fetch("/api/settings", { method: "GET" }),
+        fetch("/api/settings/history", { method: "GET" }),
+      ]);
+      const payloads = await Promise.all(responses.map(function (response) {
+        return response.json();
+      }));
+      if (!responses[0].ok) {
+        throw new Error(payloads[0].detail || "Falha ao carregar regras.");
       }
-      populateForm(payload);
-      renderSummary(payload);
+      if (!responses[1].ok) {
+        throw new Error(payloads[1].detail || "Falha ao carregar histórico.");
+      }
+      populateForm(payloads[0]);
+      renderSummary(payloads[0]);
+      renderHistory(payloads[1].items || []);
       setStatus(settingsStatus, "success", "Regras carregadas.");
     } catch (error) {
       if (error.message && /Autenticacao/.test(error.message)) {
@@ -82,6 +92,7 @@
       }
       populateForm(responsePayload);
       renderSummary(responsePayload);
+      await refreshHistory();
       setStatus(settingsStatus, "success", "Regras salvas com sucesso.");
     } catch (error) {
       setStatus(settingsStatus, "error", error.message || "Falha ao salvar regras.");
@@ -168,6 +179,55 @@
     jsonPreview.textContent = JSON.stringify(settings, null, 2);
   }
 
+  async function refreshHistory() {
+    try {
+      const response = await fetch("/api/settings/history", { method: "GET" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Falha ao carregar histórico.");
+      }
+      renderHistory(payload.items || []);
+    } catch (error) {
+      renderHistory([]);
+    }
+  }
+
+  function renderHistory(items) {
+    if (!historyList) {
+      return;
+    }
+
+    if (!Array.isArray(items) || !items.length) {
+      historyList.replaceChildren(
+        createElement("div", {
+          className: "admin-history-empty",
+          text: "Nenhuma alteração registrada ainda.",
+        }),
+      );
+      return;
+    }
+
+    historyList.replaceChildren.apply(
+      historyList,
+      items.map(function (item) {
+        const entry = document.createElement("article");
+        entry.className = "admin-history-item";
+        entry.append(
+          createElement("div", {
+            className: "admin-history-meta",
+            text: formatHistoryMeta(item),
+          }),
+          createElement("strong", {
+            className: "admin-history-title",
+            text: buildHistoryTitle(item),
+          }),
+          createHistoryChanges(item.changes || []),
+        );
+        return entry;
+      }),
+    );
+  }
+
   function summaryCard(label, value, note) {
     const card = document.createElement("article");
     card.className = "insight-card";
@@ -177,6 +237,41 @@
       createElement("span", { className: "insight-note", text: note }),
     );
     return card;
+  }
+
+  function createHistoryChanges(changes) {
+    const list = document.createElement("ul");
+    list.className = "admin-history-changes";
+    (changes.length ? changes : ["Alteração registrada sem resumo disponível."]).forEach(function (change) {
+      const item = document.createElement("li");
+      item.textContent = change;
+      list.append(item);
+    });
+    return list;
+  }
+
+  function buildHistoryTitle(item) {
+    const totalChanges = Array.isArray(item.changes) ? item.changes.length : 0;
+    return totalChanges === 1
+      ? "1 regra atualizada"
+      : totalChanges + " ajustes registrados";
+  }
+
+  function formatHistoryMeta(item) {
+    const actor = item.actor || "admin";
+    const changedAt = item.changedAt ? formatDateTime(item.changedAt) : "momento não informado";
+    return actor + " · " + changedAt;
+  }
+
+  function formatDateTime(value) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+    return parsed.toLocaleString("pt-BR", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
   }
 
   function weekdayLabel(value) {

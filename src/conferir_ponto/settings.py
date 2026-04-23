@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import json
 from pathlib import Path
 from typing import Any
@@ -8,7 +9,9 @@ from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 SETTINGS_PATH = BASE_DIR / "data" / "settings" / "apuracao.json"
+SETTINGS_HISTORY_PATH = BASE_DIR / "data" / "settings" / "apuracao-history.jsonl"
 DEFAULT_WORKING_WEEKDAYS = (0, 1, 2, 3, 4)
+MAX_SETTINGS_HISTORY_ENTRIES = 100
 
 
 @dataclass(frozen=True)
@@ -169,3 +172,131 @@ def parse_settings_payload(raw_payload: dict[str, Any] | None) -> ApuracaoSettin
 
 def normalize_journey_code(code: str) -> str:
     return str(code).zfill(4)
+
+
+def load_settings_history(limit: int = 12) -> list[dict[str, Any]]:
+    if not SETTINGS_HISTORY_PATH.exists():
+        return []
+
+    items: list[dict[str, Any]] = []
+    with SETTINGS_HISTORY_PATH.open("r", encoding="utf-8") as history_file:
+        for line in history_file:
+            raw_line = line.strip()
+            if not raw_line:
+                continue
+            try:
+                items.append(json.loads(raw_line))
+            except json.JSONDecodeError:
+                continue
+
+    items.sort(key=lambda item: item.get("changedAt", ""), reverse=True)
+    return items[: max(0, int(limit))]
+
+
+def append_settings_history(
+    actor: str,
+    before_payload: dict[str, Any],
+    after_payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    changes = summarize_settings_changes(before_payload, after_payload)
+    if not changes:
+        return None
+
+    SETTINGS_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    entry = {
+        "changedAt": datetime.now().isoformat(timespec="seconds"),
+        "actor": actor or "admin",
+        "changes": changes,
+        "settings": after_payload,
+    }
+    with SETTINGS_HISTORY_PATH.open("a", encoding="utf-8") as history_file:
+        history_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    prune_settings_history()
+    return entry
+
+
+def prune_settings_history() -> None:
+    if not SETTINGS_HISTORY_PATH.exists():
+        return
+    lines = SETTINGS_HISTORY_PATH.read_text(encoding="utf-8").splitlines()
+    if len(lines) <= MAX_SETTINGS_HISTORY_ENTRIES:
+        return
+    SETTINGS_HISTORY_PATH.write_text(
+        "\n".join(lines[-MAX_SETTINGS_HISTORY_ENTRIES:]) + "\n",
+        encoding="utf-8",
+    )
+
+
+def summarize_settings_changes(
+    before_payload: dict[str, Any] | None,
+    after_payload: dict[str, Any] | None,
+) -> list[str]:
+    before = before_payload or {}
+    after = after_payload or {}
+    changes: list[str] = []
+
+    before_schedule = describe_schedule(before.get("defaultSchedule", {}))
+    after_schedule = describe_schedule(after.get("defaultSchedule", {}))
+    if before_schedule != after_schedule:
+        changes.append(f"Jornada padrão: {before_schedule} -> {after_schedule}")
+
+    before_weekdays = describe_weekdays(before.get("workingWeekdays"))
+    after_weekdays = describe_weekdays(after.get("workingWeekdays"))
+    if before_weekdays != after_weekdays:
+        changes.append(f"Dias úteis: {before_weekdays} -> {after_weekdays}")
+
+    before_paid = before.get("paidHours", {})
+    after_paid = after.get("paidHours", {})
+    if bool(before_paid.get("weekends")) != bool(after_paid.get("weekends")):
+        changes.append(
+            "Horas em fim de semana: "
+            + ("pagas" if bool(after_paid.get("weekends")) else "ignoradas")
+        )
+    if bool(before_paid.get("holidays")) != bool(after_paid.get("holidays")):
+        changes.append(
+            "Horas em feriado: "
+            + ("pagas" if bool(after_paid.get("holidays")) else "ignoradas")
+        )
+
+    before_codes = tuple(sorted(str(code).strip().upper() for code in before_paid.get("statusCodes", []) if str(code).strip()))
+    after_codes = tuple(sorted(str(code).strip().upper() for code in after_paid.get("statusCodes", []) if str(code).strip()))
+    if before_codes != after_codes:
+        changes.append(
+            "Status pagos: "
+            + (", ".join(before_codes) if before_codes else "nenhum")
+            + " -> "
+            + (", ".join(after_codes) if after_codes else "nenhum")
+        )
+
+    before_rule = (before.get("journeyRules", {}) or {}).get("0004", {})
+    after_rule = (after.get("journeyRules", {}) or {}).get("0004", {})
+    before_tolerance = int(before_rule.get("lateToleranceMinutes", 0) or 0)
+    after_tolerance = int(after_rule.get("lateToleranceMinutes", 0) or 0)
+    if before_tolerance != after_tolerance:
+        changes.append(
+            f"JRND 0004: tolerância de atraso {before_tolerance} min -> {after_tolerance} min"
+        )
+    before_extra = bool(before_rule.get("countOvertimeBeforeStart"))
+    after_extra = bool(after_rule.get("countOvertimeBeforeStart"))
+    if before_extra != after_extra:
+        changes.append(
+            "JRND 0004: extra antes do início "
+            + ("ativada" if after_extra else "desativada")
+        )
+
+    return changes
+
+
+def describe_schedule(schedule_payload: dict[str, Any] | None) -> str:
+    schedule = schedule_payload or {}
+    start = str(schedule.get("start", "--:--"))
+    lunch_start = str(schedule.get("lunchStart", "--:--"))
+    lunch_end = str(schedule.get("lunchEnd", "--:--"))
+    end = str(schedule.get("end", "--:--"))
+    return f"{start}-{lunch_start} / {lunch_end}-{end}"
+
+
+def describe_weekdays(values: list[int] | tuple[int, ...] | None) -> str:
+    weekday_names = ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
+    selected = [weekday_names[int(value)] for value in values or [] if int(value) in range(0, 7)]
+    return ", ".join(selected) if selected else "nenhum"

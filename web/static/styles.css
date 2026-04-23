@@ -1057,6 +1057,7 @@ p { margin: 0; }
   justify-content: flex-start;
 }
 
+.admin-history,
 .admin-json-preview {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1066,6 +1067,51 @@ p { margin: 0; }
 
 .panel-head-inline {
   padding: 14px 16px;
+}
+
+.admin-history-list {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.admin-history-item,
+.admin-history-empty {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 14px 16px;
+}
+
+.admin-history-item {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-history-meta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.admin-history-title {
+  font-size: 15px;
+}
+
+.admin-history-changes {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.admin-history-empty {
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 .admin-json-preview pre {

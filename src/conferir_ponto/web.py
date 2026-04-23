@@ -17,7 +17,13 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from conferir_ponto.settings import load_settings, save_settings, settings_to_payload
+from conferir_ponto.settings import (
+    append_settings_history,
+    load_settings,
+    load_settings_history,
+    save_settings,
+    settings_to_payload,
+)
 from conferir_ponto.timecard import (
     build_summary_payload,
     export_analysis_to_pdf,
@@ -31,7 +37,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
@@ -153,14 +159,28 @@ async def get_settings(request: Request) -> JSONResponse:
     return JSONResponse(settings_to_payload(load_settings()))
 
 
+@app.get("/api/settings/history")
+async def get_settings_history(request: Request) -> JSONResponse:
+    ensure_admin(request)
+    items = load_settings_history()
+    return JSONResponse({"items": items, "count": len(items)})
+
+
 @app.put("/api/settings")
 async def update_settings(request: Request, payload: dict[str, Any]) -> JSONResponse:
     ensure_admin(request)
+    previous_payload = settings_to_payload(load_settings())
     try:
         settings = save_settings(payload)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return JSONResponse(settings_to_payload(settings))
+    persisted_payload = settings_to_payload(settings)
+    append_settings_history(
+        actor=get_authenticated_admin_username(request),
+        before_payload=previous_payload,
+        after_payload=persisted_payload,
+    )
+    return JSONResponse(persisted_payload)
 
 
 @app.get("/api/reports/{report_id}")
@@ -320,6 +340,19 @@ def is_admin_authenticated(request: Request) -> bool:
 def ensure_admin(request: Request) -> None:
     if not is_admin_authenticated(request):
         raise HTTPException(status_code=401, detail="Autenticacao administrativa necessaria.")
+
+
+def get_authenticated_admin_username(request: Request) -> str:
+    token = request.cookies.get(ADMIN_SESSION_COOKIE, "")
+    if token:
+        try:
+            token_username, _, _ = token.split(":", 2)
+        except ValueError:
+            token_username = ""
+        if token_username:
+            return token_username
+    username, _ = get_admin_credentials()
+    return username
 
 
 def should_set_secure_cookie(request: Request) -> bool:

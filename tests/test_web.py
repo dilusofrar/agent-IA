@@ -141,7 +141,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.3.0")
+        self.assertEqual(response.json()["version"], "1.4.0")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
 
@@ -167,7 +167,8 @@ class WebAppTests(unittest.TestCase):
         client = TestClient(app)
         with TemporaryDirectory() as temp_dir:
             settings_path = Path(temp_dir) / "apuracao.json"
-            with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch("conferir_ponto.settings.SETTINGS_PATH", settings_path):
+            history_path = Path(temp_dir) / "apuracao-history.jsonl"
+            with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch("conferir_ponto.settings.SETTINGS_PATH", settings_path), patch("conferir_ponto.settings.SETTINGS_HISTORY_PATH", history_path):
                 self.login_admin(client)
                 response = client.put(
                     "/api/settings",
@@ -196,9 +197,56 @@ class WebAppTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertTrue(settings_path.exists())
                 persisted = settings_path.read_text(encoding="utf-8")
+                history = history_path.read_text(encoding="utf-8")
 
         self.assertIn('"start": "08:00"', persisted)
         self.assertIn('"lateToleranceMinutes": 9', persisted)
+        self.assertIn('"actor": "admin"', history)
+        self.assertIn("Jornada padrão", history)
+
+    def test_settings_history_returns_latest_audit_entries(self):
+        client = TestClient(app)
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "apuracao.json"
+            history_path = Path(temp_dir) / "apuracao-history.jsonl"
+            settings_path.write_text(
+                '{"defaultSchedule":{"start":"07:45","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"},"workingWeekdays":[0,1,2,3,4],"paidHours":{"weekends":true,"holidays":true,"statusCodes":["CO","FE","RE"]},"journeyRules":{"0004":{"countOvertimeBeforeStart":false,"lateToleranceMinutes":5}}}',
+                encoding="utf-8",
+            )
+
+            with patch.dict("os.environ", {"ADMIN_USERNAME": "diegoluks", "ADMIN_PASSWORD": "secret123"}, clear=False), patch("conferir_ponto.settings.SETTINGS_PATH", settings_path), patch("conferir_ponto.settings.SETTINGS_HISTORY_PATH", history_path):
+                self.login_admin(client, username="diegoluks")
+                save_response = client.put(
+                    "/api/settings",
+                    json={
+                        "defaultSchedule": {
+                            "start": "08:00",
+                            "lunchStart": "12:00",
+                            "lunchEnd": "13:00",
+                            "end": "17:30",
+                        },
+                        "workingWeekdays": [0, 1, 2, 3, 4],
+                        "paidHours": {
+                            "weekends": True,
+                            "holidays": True,
+                            "statusCodes": ["CO", "FE", "RE"],
+                        },
+                        "journeyRules": {
+                            "0004": {
+                                "countOvertimeBeforeStart": False,
+                                "lateToleranceMinutes": 9,
+                            }
+                        },
+                    },
+                )
+                response = client.get("/api/settings/history")
+
+        self.assertEqual(save_response.status_code, 200)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["actor"], "diegoluks")
+        self.assertIn("Jornada padrão", payload["items"][0]["changes"][0])
 
     def test_recent_reports_endpoint_returns_latest_items(self):
         client = TestClient(app)
