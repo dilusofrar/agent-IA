@@ -644,9 +644,7 @@ p { margin: 0; }
 }
 
 .panel-table .panel-head {
-  position: sticky;
-  top: 64px;
-  z-index: 5;
+  position: static;
   background: var(--surface-2);
 }
 
@@ -660,6 +658,7 @@ p { margin: 0; }
   max-height: 620px;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+  border-top: 1px solid var(--border);
 }
 
 .data-table {
@@ -681,10 +680,8 @@ p { margin: 0; }
 }
 
 .data-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 4;
-  background: var(--surface);
+  position: static;
+  background: var(--surface-2);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .04em;
