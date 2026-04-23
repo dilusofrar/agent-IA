@@ -7,106 +7,29 @@
   const dzTitle = document.getElementById("dropzone-title");
   const dzHint = document.getElementById("dropzone-hint");
   const submitBtn = document.getElementById("submit-btn");
-
   const statusEl = document.getElementById("status");
   const resultsEl = document.getElementById("results");
   const employeeEl = document.getElementById("employee-name");
   const periodEl = document.getElementById("period-text");
   const summaryGrid = document.getElementById("summary-grid");
+  const insightsGrid = document.getElementById("insights-grid");
   const issuesList = document.getElementById("issues-list");
   const issuesCount = document.getElementById("inconsistency-count");
   const daysTable = document.getElementById("days-table");
   const exportLink = document.getElementById("export-link");
   const healthPill = document.getElementById("health-pill");
   const yearEl = document.getElementById("year");
+  const recentList = document.getElementById("recent-list");
+  const recentCount = document.getElementById("recent-count");
+  const filterGroup = document.getElementById("day-filter-group");
+  const searchInput = document.getElementById("day-search");
+  const tableStats = document.getElementById("table-stats");
 
-  if (yearEl) {
-    yearEl.textContent = String(new Date().getFullYear());
-  }
-
-  fetch("/healthz", { method: "GET" })
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error("offline");
-      }
-      setHealth(true);
-    })
-    .catch(() => setHealth(false));
-
-  function setHealth(online) {
-    if (!healthPill) return;
-    healthPill.classList.toggle("pill-success", online);
-    healthPill.innerHTML = online
-      ? '<span class="dot"></span> Sistema operacional'
-      : '<span class="dot" style="background:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.18)"></span> Indisponível';
-  }
-
-  function setStatus(kind, message) {
-    statusEl.hidden = false;
-    statusEl.classList.remove("is-loading", "is-success", "is-error");
-    if (kind) {
-      statusEl.classList.add("is-" + kind);
-    }
-    statusEl.innerHTML =
-      kind === "loading"
-        ? '<span class="spinner" aria-hidden="true"></span><span>' + escapeHtml(message) + "</span>"
-        : "<span>" + escapeHtml(message) + "</span>";
-  }
-
-  function clearStatus() {
-    statusEl.hidden = true;
-    statusEl.className = "status";
-    statusEl.innerHTML = "";
-  }
-
-  if (dropzone && fileInput) {
-    ["dragenter", "dragover"].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        dropzone.classList.add("is-drag");
-      });
-    });
-
-    ["dragleave", "drop"].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        dropzone.classList.remove("is-drag");
-      });
-    });
-
-    dropzone.addEventListener("drop", (event) => {
-      const files = event.dataTransfer && event.dataTransfer.files;
-      if (files && files[0]) {
-        if (!looksLikePdf(files[0])) {
-          setStatus("error", "Formato inválido. Envie um arquivo PDF.");
-          return;
-        }
-        fileInput.files = files;
-        updateDropzoneFromFile(files[0]);
-      }
-    });
-
-    fileInput.addEventListener("change", () => {
-      const file = fileInput.files && fileInput.files[0];
-      if (file) {
-        updateDropzoneFromFile(file);
-      }
-    });
-  }
-
-  function looksLikePdf(file) {
-    if (!file) return false;
-    return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  }
-
-  function updateDropzoneFromFile(file) {
-    const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
-    dropzone.classList.add("has-file");
-    dzTitle.textContent = file.name;
-    dzHint.textContent = "PDF selecionado · " + sizeMB + " MB";
-  }
+  const state = {
+    payload: null,
+    filter: "all",
+    query: "",
+  };
 
   const summaryConfig = [
     ["Dias processados", "businessDaysProcessed", ""],
@@ -125,8 +48,89 @@
     ["Saída antecipada", "earlyLeave", "danger"],
   ];
 
+  const filterPredicates = {
+    all: function () {
+      return true;
+    },
+    issues: function (day) {
+      return Array.isArray(day.issues) && day.issues.length > 0;
+    },
+    ignored: function (day) {
+      return Boolean(day.ignored);
+    },
+    overtime: function (day) {
+      return day.paidOvertime && day.paidOvertime !== "00:00";
+    },
+    late: function (day) {
+      return (day.late && day.late !== "00:00") || (day.earlyLeave && day.earlyLeave !== "00:00");
+    },
+  };
+
+  if (yearEl) {
+    yearEl.textContent = String(new Date().getFullYear());
+  }
+
+  checkHealth();
+  fetchRecentReports();
+
+  if (dropzone && fileInput) {
+    ["dragenter", "dragover"].forEach(function (eventName) {
+      dropzone.addEventListener(eventName, function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        dropzone.classList.add("is-drag");
+      });
+    });
+
+    ["dragleave", "drop"].forEach(function (eventName) {
+      dropzone.addEventListener(eventName, function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        dropzone.classList.remove("is-drag");
+      });
+    });
+
+    dropzone.addEventListener("drop", function (event) {
+      const files = event.dataTransfer && event.dataTransfer.files;
+      if (files && files[0]) {
+        if (!looksLikePdf(files[0])) {
+          setStatus("error", "Formato inválido. Envie um arquivo PDF.");
+          return;
+        }
+        fileInput.files = files;
+        updateDropzoneFromFile(files[0]);
+      }
+    });
+
+    fileInput.addEventListener("change", function () {
+      const file = fileInput.files && fileInput.files[0];
+      if (file) {
+        updateDropzoneFromFile(file);
+      }
+    });
+  }
+
+  if (filterGroup) {
+    filterGroup.addEventListener("click", function (event) {
+      const button = event.target.closest("[data-filter]");
+      if (!button) {
+        return;
+      }
+      state.filter = button.getAttribute("data-filter") || "all";
+      syncFilterButtons();
+      renderDaysSection();
+    });
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener("input", function () {
+      state.query = String(searchInput.value || "").trim().toLowerCase();
+      renderDaysSection();
+    });
+  }
+
   if (form) {
-    form.addEventListener("submit", async (event) => {
+    form.addEventListener("submit", async function (event) {
       event.preventDefault();
 
       const file = fileInput.files && fileInput.files[0];
@@ -143,8 +147,7 @@
       const formData = new FormData();
       formData.append("file", file);
 
-      submitBtn.disabled = true;
-      submitBtn.querySelector(".btn-label").textContent = "Processando…";
+      setSubmitState(true);
       setStatus("loading", "Enviando e processando o cartão de ponto…");
 
       try {
@@ -155,18 +158,110 @@
         }
         renderResults(payload);
         setStatus("success", "Apuração concluída com sucesso.");
+        fetchRecentReports();
       } catch (error) {
         console.error(error);
         resultsEl.hidden = true;
         setStatus("error", error && error.message ? error.message : "Falha ao processar o cartão.");
       } finally {
-        submitBtn.disabled = false;
-        submitBtn.querySelector(".btn-label").textContent = "Processar cartão";
+        setSubmitState(false);
       }
     });
   }
 
+  function checkHealth() {
+    fetch("/healthz", { method: "GET" })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("offline");
+        }
+        return response.json();
+      })
+      .then(function (payload) {
+        setHealth(true, payload && payload.version ? "Sistema operacional · v" + payload.version : "Sistema operacional");
+      })
+      .catch(function () {
+        setHealth(false, "Indisponível");
+      });
+  }
+
+  async function fetchRecentReports() {
+    if (!recentList || !recentCount) {
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/reports/recent", { method: "GET" });
+      if (!response.ok) {
+        throw new Error("Falha ao carregar histórico");
+      }
+      const payload = await response.json();
+      renderRecentReports(payload.items || []);
+    } catch (error) {
+      recentCount.textContent = "0";
+      recentCount.className = "badge badge-muted";
+      recentList.replaceChildren(createEmptyState("Ainda não há apurações recentes nesta sessão.", "recent-empty"));
+    }
+  }
+
+  function setHealth(online, label) {
+    if (!healthPill) return;
+    healthPill.replaceChildren();
+    healthPill.classList.toggle("pill-success", online);
+    const dot = createElement("span", { className: "dot" });
+    if (!online) {
+      dot.style.background = "#dc2626";
+      dot.style.boxShadow = "0 0 0 3px rgba(220,38,38,.18)";
+    }
+    healthPill.append(dot, document.createTextNode(label));
+  }
+
+  function setSubmitState(isBusy) {
+    if (!submitBtn) return;
+    submitBtn.disabled = isBusy;
+    const label = submitBtn.querySelector(".btn-label");
+    if (label) {
+      label.textContent = isBusy ? "Processando…" : "Processar cartão";
+    }
+  }
+
+  function setStatus(kind, message) {
+    if (!statusEl) return;
+    statusEl.hidden = false;
+    statusEl.className = "status";
+    if (kind) {
+      statusEl.classList.add("is-" + kind);
+    }
+
+    const content = [];
+    if (kind === "loading") {
+      content.push(createElement("span", { className: "spinner", attrs: { "aria-hidden": "true" } }));
+    }
+    content.push(createElement("span", { text: message }));
+    statusEl.replaceChildren.apply(statusEl, content);
+  }
+
+  function looksLikePdf(file) {
+    if (!file) return false;
+    return file.type === "application/pdf" || String(file.name || "").toLowerCase().endsWith(".pdf");
+  }
+
+  function updateDropzoneFromFile(file) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    dropzone.classList.add("has-file");
+    dzTitle.textContent = file.name;
+    dzHint.textContent = "PDF selecionado · " + sizeMB + " MB";
+  }
+
   function renderResults(payload) {
+    state.payload = payload;
+    state.filter = "all";
+    state.query = "";
+    if (searchInput) {
+      searchInput.value = "";
+    }
+    syncFilterButtons();
+
     employeeEl.textContent = payload.employeeName || "Colaborador não identificado";
     periodEl.textContent =
       "Período: " +
@@ -174,80 +269,229 @@
       " até " +
       formatDate(payload.periodEnd) +
       " · Processado em " +
-      String(payload.processedAt || "").replace("T", " ");
+      formatDateTime(payload.processedAt);
 
-    summaryGrid.innerHTML = "";
-    summaryConfig.forEach(([label, key, tone]) => {
-      summaryGrid.appendChild(
-        renderMetric({
-          label: label,
-          value: payload.summary && key in payload.summary ? payload.summary[key] : "—",
-          tone: tone,
-        }),
-      );
-    });
-
-    const issueDays = (payload.days || []).filter((day) => Array.isArray(day.issues) && day.issues.length);
-    issuesList.innerHTML = "";
-    issuesCount.textContent = String(issueDays.length);
-    issuesCount.className = "badge " + (issueDays.length ? "badge-warning" : "badge-success");
-
-    if (!issueDays.length) {
-      issuesList.innerHTML =
-        '<div class="issue"><span class="issue-icon">✓</span><div class="issue-body"><span class="issue-title">Nenhuma inconsistência crítica</span><span class="issue-desc">Os dias úteis com batidas completas foram processados sem alertas.</span></div></div>';
-    } else {
-      issueDays.forEach((day) => {
-        issuesList.appendChild(renderIssue(day));
-      });
-    }
-
-    daysTable.innerHTML = "";
-    if (!(payload.days || []).length) {
-      const emptyRow = document.createElement("tr");
-      emptyRow.className = "empty-row";
-      emptyRow.innerHTML = '<td colspan="14">Nenhum registro diário disponível.</td>';
-      daysTable.appendChild(emptyRow);
-    } else {
-      payload.days.forEach((day) => {
-        daysTable.appendChild(renderDay(day));
-      });
-    }
-
-    exportLink.href = "/api/export/" + encodeURIComponent(payload.reportId);
-    exportLink.hidden = !payload.reportId;
+    renderSummary(payload.summary || {});
+    renderInsights(payload);
+    renderIssues(payload.days || []);
+    renderDaysSection();
+    renderExportLink(payload.reportId);
 
     resultsEl.hidden = false;
     resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function renderSummary(summary) {
+    const cards = summaryConfig.map(function (config) {
+      const label = config[0];
+      const key = config[1];
+      const tone = config[2];
+      return renderMetric({
+        label: label,
+        value: Object.prototype.hasOwnProperty.call(summary, key) ? summary[key] : "—",
+        tone: tone,
+      });
+    });
+    summaryGrid.replaceChildren.apply(summaryGrid, cards);
+  }
+
+  function renderInsights(payload) {
+    if (!insightsGrid) return;
+
+    const diagnostics = payload.diagnostics || {};
+    const meta = payload.meta || {};
+    const cards = [
+      {
+        label: "Tempo de processamento",
+        value: formatDuration(meta.processingDurationMs),
+        note: "Do upload ao relatório pronto",
+      },
+      {
+        label: "Dias com inconsistência",
+        value: String(diagnostics.daysWithIssues || 0),
+        note: "Pontos que merecem conferência manual",
+      },
+      {
+        label: "Dias com extra paga",
+        value: String(diagnostics.paidOvertimeDays || 0),
+        note: "Dias fora do saldo normal de jornada",
+      },
+      {
+        label: "Atrasos ou saídas antecipadas",
+        value: String((diagnostics.lateDays || 0) + (diagnostics.earlyLeaveDays || 0)),
+        note: "Ocorrências com impacto no banco",
+      },
+      {
+        label: "Batidas incompletas",
+        value: String(diagnostics.missingPunchDays || 0),
+        note: "Dias em que não foi possível fechar intervalos",
+      },
+      {
+        label: "Ignorados no período",
+        value: String(diagnostics.ignoredDays || 0),
+        note: summarizeIgnoredBreakdown(diagnostics.ignoredBreakdown || []),
+      },
+    ].map(renderInsightCard);
+
+    insightsGrid.replaceChildren.apply(insightsGrid, cards);
+  }
+
+  function renderIssues(days) {
+    const issueDays = days.filter(function (day) {
+      return Array.isArray(day.issues) && day.issues.length;
+    });
+
+    issuesCount.textContent = String(issueDays.length);
+    issuesCount.className = "badge " + (issueDays.length ? "badge-warning" : "badge-success");
+
+    if (!issueDays.length) {
+      issuesList.replaceChildren(
+        createIssueItem(
+          "Nenhuma inconsistência crítica",
+          "Os dias úteis com batidas completas foram processados sem alertas.",
+          true,
+        ),
+      );
+      return;
+    }
+
+    issuesList.replaceChildren.apply(
+      issuesList,
+      issueDays.map(function (day) {
+        return createIssueItem(
+          formatDate(day.date) + " · " + (day.statusLabel || "Inconsistência"),
+          day.issues.join(" · "),
+          false,
+        );
+      }),
+    );
+  }
+
+  function renderDaysSection() {
+    if (!state.payload) {
+      return;
+    }
+
+    const days = filterDays(state.payload.days || [], state.filter, state.query);
+    renderTableStats(days, state.payload.days || []);
+
+    if (!days.length) {
+      const emptyRow = createElement("tr", { className: "empty-row" });
+      const cell = createElement("td", {
+        attrs: { colspan: "14" },
+      });
+      cell.appendChild(createEmptyState("Nenhum dia corresponde ao filtro atual.", "table-empty"));
+      emptyRow.appendChild(cell);
+      daysTable.replaceChildren(emptyRow);
+      return;
+    }
+
+    daysTable.replaceChildren.apply(
+      daysTable,
+      days.map(renderDay),
+    );
+  }
+
+  function renderTableStats(filteredDays, allDays) {
+    if (!tableStats) return;
+    const cards = [
+      createStatPill("Mostrando", String(filteredDays.length) + " de " + String(allDays.length) + " dias"),
+      createStatPill("Filtro", filterLabel(state.filter)),
+      createStatPill("Busca", state.query ? "“" + state.query + "”" : "Sem busca"),
+    ];
+    tableStats.replaceChildren.apply(tableStats, cards);
+  }
+
+  function renderRecentReports(items) {
+    if (!recentList || !recentCount) return;
+
+    recentCount.textContent = String(items.length);
+    recentCount.className = "badge " + (items.length ? "badge-success" : "badge-muted");
+
+    if (!items.length) {
+      recentList.replaceChildren(createEmptyState("Ainda não há apurações recentes nesta sessão.", "recent-empty"));
+      return;
+    }
+
+    recentList.replaceChildren.apply(
+      recentList,
+      items.map(renderRecentItem),
+    );
+  }
+
   function renderMetric(metric) {
-    const wrap = document.createElement("div");
-    wrap.className = "metric";
-    wrap.innerHTML =
-      '<div class="metric-head">' +
-      '<span class="metric-label">' + escapeHtml(metric.label) + "</span>" +
-      '<span class="metric-icon ' + escapeHtml(metric.tone || "") + '">' + pickIcon(metric.label) + "</span>" +
-      "</div>" +
-      '<div class="metric-value">' + escapeHtml(String(metric.value)) + "</div>";
+    const wrap = createElement("div", { className: "metric" });
+    const head = createElement("div", { className: "metric-head" });
+    const label = createElement("span", { className: "metric-label", text: metric.label });
+    const icon = createElement("span", {
+      className: "metric-icon" + (metric.tone ? " " + metric.tone : ""),
+    });
+    icon.appendChild(createIcon(metric.label));
+    head.append(label, icon);
+
+    const value = createElement("div", {
+      className: "metric-value",
+      text: String(metric.value),
+    });
+
+    wrap.append(head, value);
     return wrap;
   }
 
-  function renderIssue(day) {
-    const item = document.createElement("div");
-    item.className = "issue";
-    item.innerHTML =
-      '<span class="issue-icon">!</span>' +
-      '<div class="issue-body">' +
-      '<span class="issue-title">' +
-      escapeHtml(formatDate(day.date) + " · " + (day.statusLabel || "Inconsistência")) +
-      "</span>" +
-      '<span class="issue-desc">' + escapeHtml(day.issues.join(" · ")) + "</span>" +
-      "</div>";
-    return item;
+  function renderInsightCard(card) {
+    const wrap = createElement("article", { className: "insight-card" });
+    wrap.append(
+      createElement("span", { className: "insight-label", text: card.label }),
+      createElement("strong", { text: card.value }),
+      createElement("span", { className: "insight-note", text: card.note }),
+    );
+    return wrap;
+  }
+
+  function renderRecentItem(item) {
+    const wrap = createElement("article", { className: "recent-item" });
+    const head = createElement("div", { className: "recent-item-head" });
+    head.append(
+      createElement("strong", { text: item.employeeName || "Colaborador não identificado" }),
+      createElement("small", { text: item.filename || "Arquivo sem nome" }),
+    );
+
+    const meta = createElement("div", { className: "recent-item-meta" });
+    meta.append(
+      createElement("span", {
+        text:
+          "Período " +
+          formatDate(item.periodStart) +
+          " até " +
+          formatDate(item.periodEnd),
+      }),
+      createElement("span", {
+        text: "Processado em " + formatDateTime(item.processedAt || item.createdAt),
+      }),
+    );
+
+    const metrics = createElement("div", { className: "recent-item-metrics" });
+    metrics.append(
+      createElement("span", {
+        className: "recent-metric",
+        text: "Saldo " + (item.summary && item.summary.balance ? item.summary.balance : "—"),
+      }),
+      createElement("span", {
+        className: "recent-metric",
+        text: "Inconsistências " + String((item.summary && item.summary.inconsistencyCount) || 0),
+      }),
+      createElement("span", {
+        className: "recent-metric",
+        text: "Extra paga " + ((item.summary && item.summary.paidOvertime) || "00:00"),
+      }),
+    );
+
+    wrap.append(head, meta, metrics);
+    return wrap;
   }
 
   function renderDay(day) {
-    const row = document.createElement("tr");
+    const row = createElement("tr");
     if (day.issues && day.issues.length) {
       row.classList.add("row-issue");
     }
@@ -256,32 +500,95 @@
     }
 
     const alerts = buildAlerts(day);
-    row.innerHTML =
-      "<td><span class=\"day-date\">" + escapeHtml(formatDate(day.date)) + "</span><span class=\"day-weekday\">" + escapeHtml(day.weekday || "") + "</span></td>" +
-      "<td>" + escapeHtml(day.journeyCode || "-") + "</td>" +
-      "<td>" + escapeHtml(day.appliedSchedule || "-") + "</td>" +
-      "<td>" + renderStatusBadge(day) + "</td>" +
-      "<td>" + escapeHtml(day.firstEntry || "-") + "</td>" +
-      "<td>" + escapeHtml(day.lastExit || "-") + "</td>" +
-      "<td>" + escapeHtml(day.worked || "-") + "</td>" +
-      "<td>" + escapeHtml(day.balance || "-") + "</td>" +
-      "<td>" + escapeHtml(day.overtimeBeforeLunch || "-") + "</td>" +
-      "<td>" + escapeHtml(day.overtimeAfterLunch || "-") + "</td>" +
-      "<td>" + escapeHtml(day.paidOvertime || "-") + "</td>" +
-      "<td>" + escapeHtml(day.late || "-") + "</td>" +
-      "<td>" + escapeHtml(day.earlyLeave || "-") + "</td>" +
-      "<td>" + renderAlertsList(alerts) + "</td>";
+    row.append(
+      createCellWithDate(day),
+      createCell(day.journeyCode || "-"),
+      createCell(day.appliedSchedule || "-"),
+      createStatusCell(day),
+      createCell(day.firstEntry || "-"),
+      createCell(day.lastExit || "-"),
+      createCell(day.worked || "-"),
+      createCell(day.balance || "-"),
+      createCell(day.overtimeBeforeLunch || "-"),
+      createCell(day.overtimeAfterLunch || "-"),
+      createCell(day.paidOvertime || "-"),
+      createCell(day.late || "-"),
+      createCell(day.earlyLeave || "-"),
+      createAlertsCell(alerts),
+    );
     return row;
   }
 
-  function renderStatusBadge(day) {
+  function createCell(value) {
+    return createElement("td", { text: value });
+  }
+
+  function createCellWithDate(day) {
+    const cell = document.createElement("td");
+    cell.append(
+      createElement("span", { className: "day-date", text: formatDate(day.date) }),
+      createElement("span", { className: "day-weekday", text: day.weekday || "" }),
+    );
+    return cell;
+  }
+
+  function createStatusCell(day) {
+    const cell = document.createElement("td");
     let badgeClass = "badge-success";
     if (day.issues && day.issues.length) {
       badgeClass = "badge-warning";
     } else if (day.ignored) {
       badgeClass = "badge-muted";
     }
-    return '<span class="badge ' + badgeClass + '">' + escapeHtml(day.statusLabel || "—") + "</span>";
+    cell.appendChild(
+      createElement("span", {
+        className: "badge " + badgeClass,
+        text: day.statusLabel || "—",
+      }),
+    );
+    return cell;
+  }
+
+  function createAlertsCell(alerts) {
+    const cell = document.createElement("td");
+    const list = createElement("ul", { className: "alerts-list" });
+    alerts.forEach(function (alert) {
+      list.appendChild(createElement("li", { text: alert }));
+    });
+    cell.appendChild(list);
+    return cell;
+  }
+
+  function createIssueItem(title, description, isSuccess) {
+    const item = createElement("div", { className: "issue" });
+    const icon = createElement("span", {
+      className: "issue-icon",
+      text: isSuccess ? "✓" : "!",
+    });
+    if (isSuccess) {
+      icon.style.background = "var(--success-bg)";
+      icon.style.color = "var(--success)";
+    }
+    const body = createElement("div", { className: "issue-body" });
+    body.append(
+      createElement("span", { className: "issue-title", text: title }),
+      createElement("span", { className: "issue-desc", text: description }),
+    );
+    item.append(icon, body);
+    return item;
+  }
+
+  function createStatPill(label, value) {
+    const pill = createElement("span", { className: "stat-pill" });
+    pill.append(
+      createElement("strong", { text: label + ":" }),
+      document.createTextNode(" " + value),
+    );
+    return pill;
+  }
+
+  function createEmptyState(message, className) {
+    return createElement("div", { className: className, text: message });
   }
 
   function buildAlerts(day) {
@@ -306,42 +613,170 @@
     return alerts;
   }
 
-  function renderAlertsList(alerts) {
-    return (
-      '<ul class="alerts-list">' +
-      alerts.map((alert) => "<li>" + escapeHtml(alert) + "</li>").join("") +
-      "</ul>"
-    );
+  function filterDays(days, filter, query) {
+    const predicate = filterPredicates[filter] || filterPredicates.all;
+    return days.filter(function (day) {
+      if (!predicate(day)) {
+        return false;
+      }
+      if (!query) {
+        return true;
+      }
+      return buildSearchText(day).includes(query);
+    });
+  }
+
+  function buildSearchText(day) {
+    return [
+      day.date,
+      day.weekday,
+      day.journeyCode,
+      day.appliedSchedule,
+      day.statusLabel,
+      day.firstEntry,
+      day.lastExit,
+      day.worked,
+      day.balance,
+      day.paidOvertime,
+      day.late,
+      day.earlyLeave,
+      day.ignoredReason,
+      day.holidayName,
+      Array.isArray(day.issues) ? day.issues.join(" ") : "",
+    ]
+      .join(" ")
+      .toLowerCase();
+  }
+
+  function syncFilterButtons() {
+    if (!filterGroup) return;
+    Array.prototype.forEach.call(filterGroup.querySelectorAll("[data-filter]"), function (button) {
+      button.classList.toggle("is-active", button.getAttribute("data-filter") === state.filter);
+    });
+  }
+
+  function renderExportLink(reportId) {
+    exportLink.href = "/api/export/" + encodeURIComponent(reportId);
+    exportLink.hidden = !reportId;
+  }
+
+  function summarizeIgnoredBreakdown(items) {
+    if (!items.length) {
+      return "Sem exclusões relevantes";
+    }
+    return items
+      .slice(0, 2)
+      .map(function (item) {
+        return item.label + ": " + item.count;
+      })
+      .join(" · ");
+  }
+
+  function filterLabel(filter) {
+    const labels = {
+      all: "Todos os dias",
+      issues: "Com inconsistência",
+      ignored: "Ignorados",
+      overtime: "Com extra paga",
+      late: "Com atraso/saída antecipada",
+    };
+    return labels[filter] || "Todos os dias";
+  }
+
+  function formatDuration(value) {
+    if (typeof value !== "number" || !isFinite(value)) {
+      return "—";
+    }
+    if (value < 1000) {
+      return String(value) + " ms";
+    }
+    return (value / 1000).toFixed(1) + " s";
   }
 
   function formatDate(isoDate) {
-    if (!isoDate || !isoDate.includes("-")) {
+    if (!isoDate || String(isoDate).indexOf("-") === -1) {
       return isoDate || "—";
     }
-    const parts = isoDate.split("-");
+    const parts = String(isoDate).split("-");
     return parts[2] + "/" + parts[1] + "/" + parts[0];
   }
 
-  function pickIcon(label) {
+  function formatDateTime(value) {
+    if (!value) {
+      return "—";
+    }
+    return String(value).replace("T", " ");
+  }
+
+  function createIcon(label) {
     const text = String(label || "").toLowerCase();
-    if (/hora|trabalh|jornada/.test(text)) return svg('<circle cx="12" cy="12" r="9"></circle><polyline points="12 7 12 12 15 14"></polyline>');
-    if (/extra/.test(text)) return svg('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>');
-    if (/falta|inconsist|ausente|atras/.test(text)) return svg('<circle cx="12" cy="12" r="9"></circle><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line>');
-    if (/dia|presen/.test(text)) return svg('<rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M3 10h18"></path>');
-    if (/saldo|total|banco/.test(text)) return svg('<path d="M3 12h18"></path><path d="M3 6h18"></path><path d="M3 18h18"></path>');
-    return svg('<circle cx="12" cy="12" r="9"></circle>');
+    if (/hora|trabalh|jornada/.test(text)) return createSvgIcon("clock");
+    if (/extra/.test(text)) return createSvgIcon("pulse");
+    if (/falta|inconsist|ausente|atras/.test(text)) return createSvgIcon("alert");
+    if (/dia|presen/.test(text)) return createSvgIcon("calendar");
+    if (/saldo|total|banco/.test(text)) return createSvgIcon("list");
+    return createSvgIcon("circle");
   }
 
-  function svg(inner) {
-    return '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + inner + "</svg>";
+  function createSvgIcon(kind) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("width", "14");
+    svg.setAttribute("height", "14");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+
+    const shapes = {
+      clock: [
+        ["circle", { cx: "12", cy: "12", r: "9" }],
+        ["polyline", { points: "12 7 12 12 15 14" }],
+      ],
+      pulse: [["polyline", { points: "22 12 18 12 15 21 9 3 6 12 2 12" }]],
+      alert: [
+        ["circle", { cx: "12", cy: "12", r: "9" }],
+        ["line", { x1: "9", y1: "9", x2: "15", y2: "15" }],
+        ["line", { x1: "15", y1: "9", x2: "9", y2: "15" }],
+      ],
+      calendar: [
+        ["rect", { x: "3", y: "4", width: "18", height: "16", rx: "3" }],
+        ["path", { d: "M3 10h18" }],
+      ],
+      list: [
+        ["path", { d: "M3 12h18" }],
+        ["path", { d: "M3 6h18" }],
+        ["path", { d: "M3 18h18" }],
+      ],
+      circle: [["circle", { cx: "12", cy: "12", r: "9" }]],
+    };
+
+    (shapes[kind] || shapes.circle).forEach(function (shape) {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", shape[0]);
+      Object.keys(shape[1]).forEach(function (key) {
+        node.setAttribute(key, shape[1][key]);
+      });
+      svg.appendChild(node);
+    });
+
+    return svg;
   }
 
-  function escapeHtml(value) {
-    return String(value)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  function createElement(tag, options) {
+    const element = document.createElement(tag);
+    const config = options || {};
+    if (config.className) {
+      element.className = config.className;
+    }
+    if (config.text !== undefined) {
+      element.textContent = config.text;
+    }
+    if (config.attrs) {
+      Object.keys(config.attrs).forEach(function (key) {
+        element.setAttribute(key, config.attrs[key]);
+      });
+    }
+    return element;
   }
 })();

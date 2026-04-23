@@ -95,6 +95,17 @@
       </aside>
     </section>
 
+    <section class="panel recent-panel">
+      <header class="panel-head row">
+        <div>
+          <h3>Apurações recentes</h3>
+          <p class="muted">Últimos relatórios processados nesta sessão</p>
+        </div>
+        <span class="badge badge-muted" id="recent-count">0</span>
+      </header>
+      <div class="recent-list" id="recent-list"></div>
+    </section>
+
     <section id="results" class="results" hidden>
       <header class="results-head">
         <div class="results-head-info">
@@ -113,12 +124,22 @@
         </a>
       </header>
 
-      <section class="panel">
-        <header class="panel-head">
-          <h3>Métricas da apuração</h3>
-          <p class="muted">Resumo consolidado do período</p>
-        </header>
-        <div class="summary-grid" id="summary-grid"></div>
+      <section class="results-overview">
+        <section class="panel">
+          <header class="panel-head">
+            <h3>Métricas da apuração</h3>
+            <p class="muted">Resumo consolidado do período</p>
+          </header>
+          <div class="summary-grid" id="summary-grid"></div>
+        </section>
+
+        <section class="panel">
+          <header class="panel-head">
+            <h3>Insights operacionais</h3>
+            <p class="muted">Sinais rápidos para revisão do período</p>
+          </header>
+          <div class="insights-grid" id="insights-grid"></div>
+        </section>
       </section>
 
       <section class="panel">
@@ -140,6 +161,23 @@
           </div>
           <span class="hint-mobile">Deslize para ver mais →</span>
         </header>
+
+        <div class="table-toolbar">
+          <div class="filter-group" id="day-filter-group" aria-label="Filtros do detalhamento">
+            <button type="button" class="filter-chip is-active" data-filter="all">Todos</button>
+            <button type="button" class="filter-chip" data-filter="issues">Com inconsistência</button>
+            <button type="button" class="filter-chip" data-filter="ignored">Ignorados</button>
+            <button type="button" class="filter-chip" data-filter="overtime">Com extra paga</button>
+            <button type="button" class="filter-chip" data-filter="late">Com atraso/saída antecipada</button>
+          </div>
+
+          <label class="search-field" for="day-search">
+            <span>Buscar no detalhamento</span>
+            <input id="day-search" type="search" placeholder="Data, status, alerta, JRND..." />
+          </label>
+        </div>
+
+        <div class="table-stats" id="table-stats"></div>
 
         <div class="table-scroll">
           <table class="data-table">

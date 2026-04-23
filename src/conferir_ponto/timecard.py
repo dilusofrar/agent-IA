@@ -790,6 +790,56 @@ def format_schedule_label(schedule: WorkSchedule) -> str:
     )
 
 
+def summarize_ignored_reasons(days: list[DayMetrics]) -> list[dict[str, int | str]]:
+    counts: dict[str, int] = {}
+    for day in days:
+        if not day.ignored:
+            continue
+        label = day.ignored_reason or day.holiday_name or "Dia fora da apuracao"
+        counts[label] = counts.get(label, 0) + 1
+    return [
+        {"label": label, "count": count}
+        for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def build_diagnostics_payload(analysis: TimeCardAnalysis) -> dict:
+    days = analysis.days
+    included = analysis.included_days
+    business_days = [day for day in included if day.expected_minutes > 0]
+    ignored_days = [day for day in days if day.ignored]
+    issue_days = analysis.issues
+    paid_overtime_days = [day for day in included if day.payable_overtime_minutes > 0]
+    late_days = [day for day in business_days if day.late_minutes > 0]
+    early_leave_days = [day for day in business_days if day.early_leave_minutes > 0]
+    weekend_worked_days = [
+        day
+        for day in paid_overtime_days
+        if day.work_date.weekday() >= 5 and not day.holiday_name
+    ]
+    holiday_worked_days = [day for day in paid_overtime_days if day.holiday_name]
+    missing_punch_days = [
+        day
+        for day in issue_days
+        if any("batidas" in issue.lower() or "impar" in issue.lower() for issue in day.issues)
+    ]
+
+    return {
+        "calendarDays": len(days),
+        "includedDays": len(included),
+        "businessDays": len(business_days),
+        "ignoredDays": len(ignored_days),
+        "daysWithIssues": len(issue_days),
+        "paidOvertimeDays": len(paid_overtime_days),
+        "lateDays": len(late_days),
+        "earlyLeaveDays": len(early_leave_days),
+        "weekendWorkedDays": len(weekend_worked_days),
+        "holidayWorkedDays": len(holiday_worked_days),
+        "missingPunchDays": len(missing_punch_days),
+        "ignoredBreakdown": summarize_ignored_reasons(days),
+    }
+
+
 def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
     included = analysis.included_days
     total_worked = sum(day.worked_minutes for day in included)
@@ -804,12 +854,17 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
     total_negative = sum(day.late_minutes + day.early_leave_minutes for day in bank_days)
     total_late = sum(day.late_minutes for day in bank_days)
     total_early = sum(day.early_leave_minutes for day in bank_days)
+    diagnostics = build_diagnostics_payload(analysis)
 
     return {
         "employeeName": analysis.employee_name,
         "periodStart": analysis.period_start.isoformat(),
         "periodEnd": analysis.period_end.isoformat(),
         "processedAt": analysis.processed_at.isoformat(timespec="seconds"),
+        "meta": {
+            "calendarDays": diagnostics["calendarDays"],
+            "includedDays": diagnostics["includedDays"],
+        },
         "schedule": {
             "start": analysis.schedule.start.strftime("%H:%M"),
             "lunchStart": analysis.schedule.lunch_start.strftime("%H:%M"),
@@ -834,6 +889,7 @@ def build_summary_payload(analysis: TimeCardAnalysis) -> dict:
             "late": format_minutes(total_late),
             "earlyLeave": format_minutes(total_early),
         },
+        "diagnostics": diagnostics,
         "days": [
             {
                 "date": day.work_date.isoformat(),

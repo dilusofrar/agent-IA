@@ -20,7 +20,7 @@ class WebAppTests(unittest.TestCase):
         REPORTS.clear()
 
     def test_process_endpoint_returns_summary(self):
-        pdf_path = PROJECT_ROOT / "data" / "inputs" / "DIEGO_LUCAS_SOARES_DE_FREITAS_ARAUJO.pdf"
+        pdf_path = PROJECT_ROOT / "data" / "inputs" / "fev2026.pdf"
         client = TestClient(app)
 
         with pdf_path.open("rb") as file:
@@ -31,9 +31,12 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["summary"]["businessDaysProcessed"], 19)
+        self.assertEqual(payload["summary"]["businessDaysProcessed"], 22)
         self.assertEqual(payload["schedule"]["start"], "07:45")
         self.assertEqual(payload["schedule"]["end"], "17:00")
+        self.assertIn("diagnostics", payload)
+        self.assertIn("meta", payload)
+        self.assertIn("processingDurationMs", payload["meta"])
         self.assertIn("paidOvertime", payload["summary"])
         self.assertIn("journeyCode", payload["days"][0])
         self.assertIn("appliedSchedule", payload["days"][0])
@@ -107,8 +110,52 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["version"], "1.1.0")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
+
+    def test_recent_reports_endpoint_returns_latest_items(self):
+        client = TestClient(app)
+        REPORTS["first"] = {
+            "filename": "a.pdf",
+            "pdf": b"%PDF-1.4\n",
+            "recent": {
+                "reportId": "first",
+                "filename": "a.pdf",
+                "employeeName": "Primeiro",
+                "periodStart": "2026-04-01",
+                "periodEnd": "2026-04-30",
+                "processedAt": "2026-04-22T10:00:00",
+                "createdAt": "2026-04-22T10:00:00",
+                "processingDurationMs": 120,
+                "summary": {"businessDaysProcessed": 20, "inconsistencyCount": 1, "balance": "00:10", "paidOvertime": "00:00"},
+                "diagnostics": {"ignoredDays": 2},
+            },
+        }
+        REPORTS["second"] = {
+            "filename": "b.pdf",
+            "pdf": b"%PDF-1.4\n",
+            "recent": {
+                "reportId": "second",
+                "filename": "b.pdf",
+                "employeeName": "Segundo",
+                "periodStart": "2026-05-01",
+                "periodEnd": "2026-05-31",
+                "processedAt": "2026-05-22T10:00:00",
+                "createdAt": "2026-05-22T10:00:00",
+                "processingDurationMs": 95,
+                "summary": {"businessDaysProcessed": 21, "inconsistencyCount": 0, "balance": "01:00", "paidOvertime": "02:00"},
+                "diagnostics": {"ignoredDays": 0},
+            },
+        }
+
+        response = client.get("/api/reports/recent")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 2)
+        self.assertEqual(payload["items"][0]["reportId"], "second")
+        self.assertEqual(payload["items"][1]["reportId"], "first")
 
     def test_report_cache_discards_oldest_entry_when_limit_is_reached(self):
         client = TestClient(app)
@@ -116,6 +163,7 @@ class WebAppTests(unittest.TestCase):
             REPORTS[f"existing-{index}"] = {
                 "filename": f"report-{index}.pdf",
                 "pdf": b"%PDF-1.4\ncached\n",
+                "recent": {"reportId": f"existing-{index}"},
             }
 
         fake_payload = {
@@ -123,8 +171,10 @@ class WebAppTests(unittest.TestCase):
             "periodStart": "2026-04-01",
             "periodEnd": "2026-04-30",
             "processedAt": "2026-04-11T10:00:00",
+            "meta": {"calendarDays": 30, "includedDays": 1},
             "schedule": {"start": "07:45", "lunchStart": "12:00", "lunchEnd": "13:00", "end": "17:00", "workingWeekdays": [0, 1, 2, 3, 4], "source": None},
             "summary": {"businessDaysProcessed": 1, "ignoredDays": 0, "inconsistencyCount": 0, "worked": "08:00", "expected": "08:00", "balance": "00:00", "positiveBank": "00:00", "negativeBank": "00:00", "compensated": "00:00", "paidOvertime": "00:00", "overtimeBeforeLunch": "00:00", "overtimeAfterLunch": "00:00", "late": "00:00", "earlyLeave": "00:00"},
+            "diagnostics": {"calendarDays": 30, "includedDays": 1, "ignoredDays": 0, "daysWithIssues": 0, "paidOvertimeDays": 0, "lateDays": 0, "earlyLeaveDays": 0, "weekendWorkedDays": 0, "holidayWorkedDays": 0, "missingPunchDays": 0, "ignoredBreakdown": []},
             "days": [],
         }
 

@@ -9,36 +9,42 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from conferir_ponto.timecard import build_summary_payload, format_minutes, parse_timecard_pdf, parse_timecard_text
+from conferir_ponto.timecard import (
+    build_diagnostics_payload,
+    build_summary_payload,
+    format_minutes,
+    parse_timecard_pdf,
+    parse_timecard_text,
+)
 
 
 class TimecardTests(unittest.TestCase):
     def test_sample_pdf_analysis(self):
-        pdf_path = PROJECT_ROOT / "data" / "inputs" / "DIEGO_LUCAS_SOARES_DE_FREITAS_ARAUJO.pdf"
+        pdf_path = PROJECT_ROOT / "data" / "inputs" / "fev2026.pdf"
         analysis = parse_timecard_pdf(pdf_path)
 
-        self.assertEqual(analysis.period_start.isoformat(), "2025-04-16")
-        self.assertEqual(analysis.period_end.isoformat(), "2025-05-15")
-        self.assertEqual(len(analysis.days), 30)
+        self.assertEqual(analysis.period_start.isoformat(), "2026-01-16")
+        self.assertEqual(analysis.period_end.isoformat(), "2026-02-15")
+        self.assertEqual(len(analysis.days), 31)
         self.assertEqual(analysis.schedule.start.strftime("%H:%M"), "07:45")
         self.assertEqual(analysis.schedule.end.strftime("%H:%M"), "17:00")
         self.assertEqual(sorted(analysis.schedule.working_weekdays), [0, 1, 2, 3, 4])
 
-        self.assertEqual(len(analysis.included_days), 19)
+        self.assertEqual(len(analysis.included_days), 22)
 
-        april_16 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-04-16")
-        self.assertEqual(april_16.first_entry, "07:58")
-        self.assertEqual(april_16.last_exit, "17:16")
-        self.assertEqual(format_minutes(april_16.balance_minutes), "00:03")
+        january_16 = next(day for day in analysis.days if day.work_date.isoformat() == "2026-01-16")
+        self.assertEqual(january_16.first_entry, "08:04")
+        self.assertEqual(january_16.last_exit, "17:23")
+        self.assertEqual(format_minutes(january_16.balance_minutes), "00:19")
 
-        may_1 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-05-01")
-        self.assertTrue(may_1.ignored)
+        january_21 = next(day for day in analysis.days if day.work_date.isoformat() == "2026-01-21")
+        self.assertEqual(format_minutes(january_21.late_minutes), "00:10")
 
-        april_26 = next(day for day in analysis.days if day.work_date.isoformat() == "2025-04-26")
-        self.assertFalse(april_26.ignored)
-        self.assertEqual(format_minutes(april_26.worked_minutes), "03:58")
-        self.assertEqual(format_minutes(april_26.balance_minutes), "00:00")
-        self.assertEqual(format_minutes(april_26.payable_overtime_minutes), "03:58")
+        january_31 = next(day for day in analysis.days if day.work_date.isoformat() == "2026-01-31")
+        self.assertFalse(january_31.ignored)
+        self.assertEqual(format_minutes(january_31.worked_minutes), "01:00")
+        self.assertEqual(format_minutes(january_31.balance_minutes), "00:00")
+        self.assertEqual(format_minutes(january_31.payable_overtime_minutes), "01:00")
 
     def test_vacation_days_are_ignored_without_inconsistencies(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "marco2026.pdf"
@@ -82,6 +88,39 @@ TB
         self.assertEqual(sunday.issues, [])
         self.assertEqual(summary["paidOvertime"], "08:00")
         self.assertEqual(summary["positiveBank"], "00:00")
+
+    def test_diagnostics_payload_counts_ignored_and_issue_days(self):
+        text = """
+Início Ponto: 01/03/2026
+Fim Ponto: 04/03/2026
+Matrícula: 1 - 1 TESTE USUARIO
+01 Dom
+RE
+08:00 o 12:00 i 13:00 o 17:00 i
+02 Seg
+TB
+07:45 o 12:00 i 13:00 o 17:00 i
+03 Ter
+TB
+07:45 o
+04 Qua
+TB
+FERIAS
+"""
+        analysis = parse_timecard_text(text)
+        diagnostics = build_diagnostics_payload(analysis)
+        payload = build_summary_payload(analysis)
+
+        self.assertEqual(diagnostics["calendarDays"], 4)
+        self.assertEqual(diagnostics["includedDays"], 2)
+        self.assertEqual(diagnostics["paidOvertimeDays"], 1)
+        self.assertEqual(diagnostics["daysWithIssues"], 1)
+        self.assertEqual(diagnostics["missingPunchDays"], 1)
+        self.assertEqual(diagnostics["ignoredDays"], 1)
+        self.assertEqual(diagnostics["weekendWorkedDays"], 1)
+        self.assertEqual(diagnostics["ignoredBreakdown"][0]["label"], "Ferias")
+        self.assertEqual(payload["diagnostics"]["ignoredDays"], 1)
+        self.assertEqual(payload["meta"]["calendarDays"], 4)
 
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"

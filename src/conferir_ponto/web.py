@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import datetime
+import logging
 import os
+from time import perf_counter
 from pathlib import Path
 import re
 from typing import Any
@@ -22,6 +25,8 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 STATIC_DIR = BASE_DIR / "web" / "static"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
+RECENT_REPORTS_LIMIT = 6
+APP_VERSION = "1.1.0"
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "").strip().lower() in {"1", "true", "yes", "on"}
 SECURITY_HEADERS = {
@@ -49,6 +54,7 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 REPORTS: OrderedDict[str, dict[str, Any]] = OrderedDict()
+LOGGER = logging.getLogger("conferir_ponto.web")
 
 
 @app.middleware("http")
@@ -69,7 +75,17 @@ async def index() -> HTMLResponse:
 
 @app.get("/healthz")
 async def healthcheck() -> JSONResponse:
-    return JSONResponse({"status": "ok"})
+    return JSONResponse({"status": "ok", "version": APP_VERSION})
+
+
+@app.get("/api/reports/recent")
+async def recent_reports() -> JSONResponse:
+    items = [
+        report["recent"]
+        for report in reversed(REPORTS.values())
+        if "recent" in report
+    ][:RECENT_REPORTS_LIMIT]
+    return JSONResponse({"items": items, "count": len(items)})
 
 
 @app.post("/api/process")
@@ -77,6 +93,7 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Envie um arquivo PDF valido.")
 
+    start_time = perf_counter()
     try:
         content = await file.read(MAX_UPLOAD_SIZE_BYTES + 1)
     finally:
@@ -91,16 +108,46 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
     try:
         analysis = parse_timecard_bytes(content)
     except Exception as exc:
+        LOGGER.warning(
+            "process_failed",
+            extra={
+                "filename": file.filename,
+                "size_bytes": len(content),
+                "error": str(exc),
+            },
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     payload = build_summary_payload(analysis)
     report_id = uuid4().hex
+    processing_duration_ms = int((perf_counter() - start_time) * 1000)
+    created_at = datetime.now().isoformat(timespec="seconds")
+    payload["meta"] = {
+        **payload.get("meta", {}),
+        "reportId": report_id,
+        "filename": file.filename,
+        "generatedAt": created_at,
+        "processingDurationMs": processing_duration_ms,
+        "version": APP_VERSION,
+    }
     while len(REPORTS) >= MAX_STORED_REPORTS:
         REPORTS.popitem(last=False)
     REPORTS[report_id] = {
         "filename": file.filename,
         "pdf": export_analysis_to_pdf(analysis),
+        "recent": build_recent_report_item(report_id, file.filename, payload),
     }
+    LOGGER.info(
+        "process_completed",
+        extra={
+            "report_id": report_id,
+            "filename": file.filename,
+            "size_bytes": len(content),
+            "duration_ms": processing_duration_ms,
+            "issues": payload["summary"]["inconsistencyCount"],
+            "included_days": payload["summary"]["businessDaysProcessed"],
+        },
+    )
     payload["reportId"] = report_id
     return JSONResponse(payload)
 
@@ -124,3 +171,23 @@ async def export_report(report_id: str) -> Response:
 def sanitize_download_name(filename: str) -> str:
     sanitized = SAFE_DOWNLOAD_NAME.sub("_", Path(filename).stem).strip("._")
     return sanitized or "relatorio"
+
+
+def build_recent_report_item(report_id: str, filename: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "reportId": report_id,
+        "filename": filename,
+        "employeeName": payload.get("employeeName"),
+        "periodStart": payload.get("periodStart"),
+        "periodEnd": payload.get("periodEnd"),
+        "processedAt": payload.get("processedAt"),
+        "createdAt": payload.get("meta", {}).get("generatedAt"),
+        "processingDurationMs": payload.get("meta", {}).get("processingDurationMs"),
+        "summary": {
+            "businessDaysProcessed": payload.get("summary", {}).get("businessDaysProcessed"),
+            "inconsistencyCount": payload.get("summary", {}).get("inconsistencyCount"),
+            "balance": payload.get("summary", {}).get("balance"),
+            "paidOvertime": payload.get("summary", {}).get("paidOvertime"),
+        },
+        "diagnostics": payload.get("diagnostics", {}),
+    }
