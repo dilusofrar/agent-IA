@@ -111,6 +111,7 @@
     document.getElementById("schedule-end").value = settings.defaultSchedule.end;
     populateJourneySchedule("0004", settings);
     populateJourneySchedule("0048", settings);
+    populateJourneySchedule("0996", settings);
     populateJourneySchedule("0999", settings);
     document.getElementById("paid-weekends").checked = Boolean(settings.paidHours.weekends);
     document.getElementById("paid-holidays").checked = Boolean(settings.paidHours.holidays);
@@ -159,6 +160,7 @@
       journeySchedules: {
         "0004": collectJourneySchedule("0004"),
         "0048": collectJourneySchedule("0048"),
+        "0996": collectJourneySchedule("0996"),
         "0999": collectJourneySchedule("0999"),
       },
       journeyRules: {
@@ -179,6 +181,7 @@
       summaryCard("Jornada padrão", settings.defaultSchedule.start + "-" + settings.defaultSchedule.lunchStart + " / " + settings.defaultSchedule.lunchEnd + "-" + settings.defaultSchedule.end, "Base usada quando o PDF não informar outra jornada."),
       summaryCard("JRND 0004", formatSchedule(settings.journeySchedules["0004"]), "Jornada normal padrão."),
       summaryCard("JRND 0048", formatSchedule(settings.journeySchedules["0048"]), "Jornada de compensação."),
+      summaryCard("JRND 0996", formatSchedule(settings.journeySchedules["0996"]), "Jornada usada para sábado."),
       summaryCard("JRND 0999", formatSchedule(settings.journeySchedules["0999"]), "Jornada usada para domingo."),
       summaryCard("Dias úteis", (settings.workingWeekdays || []).map(weekdayLabel).join(", "), "Dias considerados úteis para cálculo normal."),
       summaryCard("Fim de semana", settings.paidHours.weekends ? "Pago" : "Ignorado", "Sábado e domingo com batida."),

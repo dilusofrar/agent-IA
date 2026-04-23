@@ -34,11 +34,17 @@
       "lunchEnd": "13:00",
       "end": "17:00"
     },
+    "0996": {
+      "start": "00:00",
+      "lunchStart": "00:00",
+      "lunchEnd": "00:00",
+      "end": "00:00"
+    },
     "0999": {
-      "start": "08:00",
-      "lunchStart": "12:00",
-      "lunchEnd": "13:00",
-      "end": "17:00"
+      "start": "00:00",
+      "lunchStart": "00:00",
+      "lunchEnd": "00:00",
+      "end": "00:00"
     }
   },
   "journeyRules": {

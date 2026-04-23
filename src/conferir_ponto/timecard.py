@@ -417,6 +417,8 @@ def resolve_journey_code_for_day(
 ) -> str | None:
     if raw_day is not None and raw_day.journey_code is not None:
         return normalize_journey_code(raw_day.journey_code)
+    if work_date.weekday() == 5 and "0996" in schedule_map:
+        return "0996"
     if work_date.weekday() == 6 and "0999" in schedule_map:
         return "0999"
     return None
@@ -727,11 +729,12 @@ def split_minutes_by_lunch(
     last_exit: str,
     schedule: WorkSchedule,
 ) -> tuple[int, int]:
+    lunch_start, lunch_end = resolve_lunch_window(work_date, schedule)
     return split_interval_by_lunch(
         combine(work_date, first_entry),
         combine(work_date, last_exit),
-        lunch_start=datetime.combine(work_date, schedule.lunch_start),
-        lunch_end=datetime.combine(work_date, schedule.lunch_end),
+        lunch_start=lunch_start,
+        lunch_end=lunch_end,
     )
 
 
@@ -742,15 +745,30 @@ def split_paired_minutes_by_lunch(
     morning = 0
     afternoon = 0
     for start_dt, end_dt in pairwise_datetimes(punch_datetimes):
+        lunch_start, lunch_end = resolve_lunch_window(start_dt.date(), schedule)
         current_morning, current_afternoon = split_interval_by_lunch(
             start_dt,
             end_dt,
-            lunch_start=datetime.combine(start_dt.date(), schedule.lunch_start),
-            lunch_end=datetime.combine(start_dt.date(), schedule.lunch_end),
+            lunch_start=lunch_start,
+            lunch_end=lunch_end,
         )
         morning += current_morning
         afternoon += current_afternoon
     return morning, afternoon
+
+
+def resolve_lunch_window(work_date: date, schedule: WorkSchedule) -> tuple[datetime, datetime]:
+    if (
+        schedule.start == time(0, 0)
+        and schedule.lunch_start == time(0, 0)
+        and schedule.lunch_end == time(0, 0)
+        and schedule.end == time(0, 0)
+    ):
+        return datetime.combine(work_date, time(12, 0)), datetime.combine(work_date, time(13, 0))
+    return (
+        datetime.combine(work_date, schedule.lunch_start),
+        datetime.combine(work_date, schedule.lunch_end),
+    )
 
 
 def split_interval_by_lunch(

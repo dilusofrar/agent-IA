@@ -42,7 +42,8 @@ class ApuracaoSettings:
         default_factory=lambda: {
             "0004": JourneyScheduleSettings("08:00", "12:00", "13:00", "17:00"),
             "0048": JourneyScheduleSettings("07:45", "12:00", "13:00", "17:00"),
-            "0999": JourneyScheduleSettings("08:00", "12:00", "13:00", "17:00"),
+            "0996": JourneyScheduleSettings("00:00", "00:00", "00:00", "00:00"),
+            "0999": JourneyScheduleSettings("00:00", "00:00", "00:00", "00:00"),
         }
     )
     journey_rules: dict[str, JourneyRuleSettings] = field(
@@ -87,11 +88,17 @@ def default_settings_payload() -> dict[str, Any]:
                 "lunchEnd": "13:00",
                 "end": "17:00",
             },
+            "0996": {
+                "start": "00:00",
+                "lunchStart": "00:00",
+                "lunchEnd": "00:00",
+                "end": "00:00",
+            },
             "0999": {
-                "start": "08:00",
-                "lunchStart": "12:00",
-                "lunchEnd": "13:00",
-                "end": "17:00",
+                "start": "00:00",
+                "lunchStart": "00:00",
+                "lunchEnd": "00:00",
+                "end": "00:00",
             },
         },
         "journeyRules": {
@@ -335,6 +342,14 @@ def summarize_settings_changes(
             + (", ".join(after_codes) if after_codes else "nenhum")
         )
 
+    before_schedules = before.get("journeySchedules", {}) or {}
+    after_schedules = after.get("journeySchedules", {}) or {}
+    for code in ("0004", "0048", "0996", "0999"):
+        before_label = describe_schedule(before_schedules.get(code))
+        after_label = describe_schedule(after_schedules.get(code))
+        if before_label != after_label:
+            changes.append(f"JRND {code}: {before_label} -> {after_label}")
+
     before_rule = (before.get("journeyRules", {}) or {}).get("0004", {})
     after_rule = (after.get("journeyRules", {}) or {}).get("0004", {})
     before_tolerance = int(before_rule.get("lateToleranceMinutes", 0) or 0)
@@ -367,10 +382,3 @@ def describe_weekdays(values: list[int] | tuple[int, ...] | None) -> str:
     weekday_names = ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
     selected = [weekday_names[int(value)] for value in values or [] if int(value) in range(0, 7)]
     return ", ".join(selected) if selected else "nenhum"
-    before_schedules = before.get("journeySchedules", {}) or {}
-    after_schedules = after.get("journeySchedules", {}) or {}
-    for code in ("0004", "0048", "0999"):
-        before_label = describe_schedule(before_schedules.get(code))
-        after_label = describe_schedule(after_schedules.get(code))
-        if before_label != after_label:
-            changes.append(f"JRND {code}: {before_label} -> {after_label}")

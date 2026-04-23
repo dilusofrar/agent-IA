@@ -166,10 +166,26 @@ TB
         monday = next(day for day in analysis.days if day.work_date.isoformat() == "2026-03-02")
 
         self.assertEqual(sunday.journey_code, "0999")
-        self.assertEqual(sunday.applied_schedule_label, "08:00-12:00 / 13:00-17:00")
+        self.assertEqual(sunday.applied_schedule_label, "00:00-00:00 / 00:00-00:00")
         self.assertEqual(monday.journey_code, "0048")
         self.assertEqual(monday.applied_schedule_label, "07:45-12:00 / 13:00-17:00")
         self.assertEqual(format_minutes(monday.late_minutes), "00:07")
+
+    def test_saturday_without_code_uses_0996_fallback(self):
+        text = """
+Início Ponto: 04/04/2026
+Fim Ponto: 04/04/2026
+Matrícula: 1 - 1 TESTE USUARIO
+04 Sab
+CO
+07:45 o 12:00 i 13:00 o 17:00 i
+"""
+        analysis = parse_timecard_text(text)
+        saturday = analysis.days[0]
+
+        self.assertEqual(saturday.journey_code, "0996")
+        self.assertEqual(saturday.applied_schedule_label, "00:00-00:00 / 00:00-00:00")
+        self.assertEqual(saturday.status_label, "Extras Pagas")
 
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"
