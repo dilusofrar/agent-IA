@@ -31,7 +31,7 @@ from conferir_ponto.settings import (
     save_settings,
     settings_to_payload,
 )
-from conferir_ponto.storage import LocalReportStorage, build_report_object_key
+from conferir_ponto.storage import ReportStorage, build_report_object_key, storage_from_env
 from conferir_ponto.timecard import (
     build_summary_payload,
     export_analysis_to_pdf,
@@ -45,7 +45,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
@@ -76,6 +76,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 REPORTS: OrderedDict[str, dict[str, Any]] = OrderedDict()
 LOGGER = logging.getLogger("conferir_ponto.web")
+_REPORT_STORAGE: ReportStorage | None = None
 
 
 @app.middleware("http")
@@ -110,7 +111,13 @@ async def admin_login_page(request: Request) -> Response:
 
 @app.get("/healthz")
 async def healthcheck() -> JSONResponse:
-    return JSONResponse({"status": "ok", "version": APP_VERSION})
+    return JSONResponse(
+        {
+            "status": "ok",
+            "version": APP_VERSION,
+            "storageBackend": report_storage().backend_name,
+        }
+    )
 
 
 @app.get("/api/admin/session")
@@ -395,8 +402,11 @@ def ensure_reports_dir() -> Path:
     return REPORTS_DIR
 
 
-def report_storage() -> LocalReportStorage:
-    return LocalReportStorage(ensure_reports_dir())
+def report_storage() -> ReportStorage:
+    global _REPORT_STORAGE
+    if _REPORT_STORAGE is None:
+        _REPORT_STORAGE = storage_from_env(ensure_reports_dir())
+    return _REPORT_STORAGE
 
 
 def metadata_object_key(report_id: str) -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -19,6 +20,9 @@ class ReportStorage(Protocol):
     def delete(self, key: str) -> None: ...
 
     def exists(self, key: str) -> bool: ...
+
+    @property
+    def backend_name(self) -> str: ...
 
 
 class LocalReportStorage:
@@ -46,6 +50,83 @@ class LocalReportStorage:
     def _path_for(self, key: str) -> Path:
         parts = [part for part in key.replace("\\", "/").split("/") if part]
         return self.root_dir.joinpath(*parts)
+
+    @property
+    def backend_name(self) -> str:
+        return "local"
+
+
+class R2ReportStorage:
+    def __init__(
+        self,
+        *,
+        endpoint_url: str,
+        bucket_name: str,
+        access_key_id: str,
+        secret_access_key: str,
+        region_name: str = "auto",
+    ) -> None:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        self.bucket_name = bucket_name
+        self._client_error = ClientError
+        self.client = boto3.client(
+            service_name="s3",
+            endpoint_url=endpoint_url,
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            region_name=region_name or "auto",
+        )
+
+    def write_bytes(self, key: str, content: bytes) -> StoredObject:
+        self.client.put_object(Bucket=self.bucket_name, Key=key, Body=content)
+        return StoredObject(key=key, location=f"r2://{self.bucket_name}/{key}")
+
+    def read_bytes(self, key: str) -> bytes | None:
+        try:
+            response = self.client.get_object(Bucket=self.bucket_name, Key=key)
+        except self._client_error as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code", ""))
+            if error_code in {"NoSuchKey", "404", "NotFound"}:
+                return None
+            raise
+        return response["Body"].read()
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket_name, Key=key)
+
+    def exists(self, key: str) -> bool:
+        try:
+            self.client.head_object(Bucket=self.bucket_name, Key=key)
+            return True
+        except self._client_error as exc:
+            error_code = str(exc.response.get("Error", {}).get("Code", ""))
+            if error_code in {"NoSuchKey", "404", "NotFound"}:
+                return False
+            raise
+
+    @property
+    def backend_name(self) -> str:
+        return "r2"
+
+
+def storage_from_env(root_dir: Path) -> ReportStorage:
+    endpoint_url = os.getenv("R2_ENDPOINT_URL", "").strip()
+    bucket_name = os.getenv("R2_BUCKET_NAME", "").strip()
+    access_key_id = os.getenv("R2_ACCESS_KEY_ID", "").strip()
+    secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
+    region_name = os.getenv("R2_REGION", "auto").strip() or "auto"
+
+    if endpoint_url and bucket_name and access_key_id and secret_access_key:
+        return R2ReportStorage(
+            endpoint_url=endpoint_url,
+            bucket_name=bucket_name,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            region_name=region_name,
+        )
+    return LocalReportStorage(root_dir)
 
 
 def build_report_object_key(report_id: str, filename: str) -> str:

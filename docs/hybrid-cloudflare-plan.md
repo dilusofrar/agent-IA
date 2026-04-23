@@ -29,6 +29,18 @@ See [d1-schema.sql](/D:/diegoluks/CONFERIR%20PONTO/docs/d1-schema.sql).
 The current local storage already uses these logical keys, so the next R2 step is
 mainly a backend adapter swap instead of a route/model redesign.
 
+## R2 runtime variables
+
+When ready to enable Cloudflare R2 in production, configure:
+
+- `R2_ENDPOINT_URL` (format: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`)
+- `R2_BUCKET_NAME`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_REGION` (recommended: `auto`)
+
+If any of these are missing, the app falls back to local storage automatically.
+
 ## Next migration steps
 
 1. Replace the local storage adapter with R2 object writes.

@@ -13,12 +13,15 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from conferir_ponto.storage import LocalReportStorage, storage_from_env
 from conferir_ponto.web import REPORTS, app, sanitize_download_name
+import conferir_ponto.web as web_module
 
 
 class WebAppTests(unittest.TestCase):
     def setUp(self):
         REPORTS.clear()
+        web_module._REPORT_STORAGE = None
         self._temp_dir = TemporaryDirectory()
         self._db_patcher = patch(
             "conferir_ponto.persistence.APP_DB_PATH",
@@ -28,6 +31,7 @@ class WebAppTests(unittest.TestCase):
 
     def tearDown(self):
         self._db_patcher.stop()
+        web_module._REPORT_STORAGE = None
         self._temp_dir.cleanup()
 
     def login_admin(self, client: TestClient, username: str = "admin", password: str = "secret123"):
@@ -151,7 +155,8 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.7.0")
+        self.assertEqual(response.json()["version"], "1.8.0")
+        self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
 
@@ -480,6 +485,31 @@ class WebHelpersTests(unittest.TestCase):
             sanitize_download_name(' ../evil"\r\nname?.pdf '),
             "evil_name",
         )
+
+    def test_storage_from_env_falls_back_to_local_when_r2_is_incomplete(self):
+        with patch.dict("os.environ", {}, clear=False):
+            storage = storage_from_env(Path("D:/tmp/reports"))
+
+        self.assertIsInstance(storage, LocalReportStorage)
+        self.assertEqual(storage.backend_name, "local")
+
+    def test_storage_from_env_uses_r2_when_all_variables_exist(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "R2_ENDPOINT_URL": "https://example-account.r2.cloudflarestorage.com",
+                "R2_BUCKET_NAME": "agent-ia-ponto",
+                "R2_ACCESS_KEY_ID": "abc",
+                "R2_SECRET_ACCESS_KEY": "def",
+                "R2_REGION": "auto",
+            },
+            clear=False,
+        ), patch("conferir_ponto.storage.R2ReportStorage") as mocked_storage:
+            mocked_storage.return_value.backend_name = "r2"
+            storage = storage_from_env(Path("D:/tmp/reports"))
+
+        mocked_storage.assert_called_once()
+        self.assertEqual(storage.backend_name, "r2")
 
 
 if __name__ == "__main__":
