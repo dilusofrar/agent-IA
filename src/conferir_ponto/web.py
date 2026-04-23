@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from datetime import datetime
+from hashlib import sha256
+import hmac
 import json
 import logging
 import os
@@ -12,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from conferir_ponto.settings import load_settings, save_settings, settings_to_payload
@@ -29,7 +31,9 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
+ADMIN_SESSION_COOKIE = "agent_admin_session"
+ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "").strip().lower() in {"1", "true", "yes", "on"}
 SECURITY_HEADERS = {
@@ -76,9 +80,60 @@ async def index() -> HTMLResponse:
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
 
 
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request) -> Response:
+    if not is_admin_authenticated(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    return HTMLResponse((STATIC_DIR / "admin.html").read_text(encoding="utf-8"))
+
+
+@app.get("/admin/login", response_class=HTMLResponse)
+async def admin_login_page(request: Request) -> Response:
+    if is_admin_authenticated(request):
+        return RedirectResponse(url="/admin", status_code=303)
+    return HTMLResponse((STATIC_DIR / "admin-login.html").read_text(encoding="utf-8"))
+
+
 @app.get("/healthz")
 async def healthcheck() -> JSONResponse:
     return JSONResponse({"status": "ok", "version": APP_VERSION})
+
+
+@app.get("/api/admin/session")
+async def admin_session_status(request: Request) -> JSONResponse:
+    return JSONResponse({"authenticated": is_admin_authenticated(request)})
+
+
+@app.post("/api/admin/session")
+async def admin_session_login(request: Request, payload: dict[str, Any]) -> JSONResponse:
+    username, password = get_admin_credentials()
+    provided_username = str(payload.get("username", "")).strip()
+    provided_password = str(payload.get("password", ""))
+    if not password:
+        raise HTTPException(status_code=503, detail="Painel administrativo nao configurado.")
+    if not (
+        hmac.compare_digest(provided_username, username)
+        and hmac.compare_digest(provided_password, password)
+    ):
+        raise HTTPException(status_code=401, detail="Credenciais invalidas.")
+
+    response = JSONResponse({"authenticated": True})
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE,
+        value=create_admin_session_token(username),
+        httponly=True,
+        samesite="lax",
+        max_age=ADMIN_SESSION_TTL_SECONDS,
+        secure=should_set_secure_cookie(request),
+    )
+    return response
+
+
+@app.delete("/api/admin/session")
+async def admin_session_logout() -> JSONResponse:
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(ADMIN_SESSION_COOKIE, httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/api/reports/recent")
@@ -87,13 +142,20 @@ async def recent_reports() -> JSONResponse:
     return JSONResponse({"items": items, "count": len(items)})
 
 
+@app.get("/api/settings/public")
+async def get_public_settings() -> JSONResponse:
+    return JSONResponse(settings_to_payload(load_settings()))
+
+
 @app.get("/api/settings")
-async def get_settings() -> JSONResponse:
+async def get_settings(request: Request) -> JSONResponse:
+    ensure_admin(request)
     return JSONResponse(settings_to_payload(load_settings()))
 
 
 @app.put("/api/settings")
-async def update_settings(payload: dict[str, Any]) -> JSONResponse:
+async def update_settings(request: Request, payload: dict[str, Any]) -> JSONResponse:
+    ensure_admin(request)
     try:
         settings = save_settings(payload)
     except (TypeError, ValueError) as exc:
@@ -201,6 +263,70 @@ async def export_report(report_id: str) -> Response:
 def sanitize_download_name(filename: str) -> str:
     sanitized = SAFE_DOWNLOAD_NAME.sub("_", Path(filename).stem).strip("._")
     return sanitized or "relatorio"
+
+
+def get_admin_credentials() -> tuple[str, str]:
+    return (
+        os.getenv("ADMIN_USERNAME", "admin").strip() or "admin",
+        os.getenv("ADMIN_PASSWORD", "").strip(),
+    )
+
+
+def admin_session_secret() -> str:
+    configured_secret = os.getenv("ADMIN_SESSION_SECRET", "").strip()
+    if configured_secret:
+        return configured_secret
+    username, password = get_admin_credentials()
+    return sha256(f"{username}:{password}:agent-ia-ponto".encode("utf-8")).hexdigest()
+
+
+def create_admin_session_token(username: str) -> str:
+    issued_at = int(datetime.now().timestamp())
+    expires_at = issued_at + ADMIN_SESSION_TTL_SECONDS
+    payload = f"{username}:{expires_at}"
+    signature = hmac.new(
+        admin_session_secret().encode("utf-8"),
+        payload.encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def is_admin_authenticated(request: Request) -> bool:
+    username, password = get_admin_credentials()
+    if not password:
+        return False
+    token = request.cookies.get(ADMIN_SESSION_COOKIE, "")
+    if not token:
+        return False
+    try:
+        token_username, token_expires, token_signature = token.split(":", 2)
+        expires_at = int(token_expires)
+    except ValueError:
+        return False
+    payload = f"{token_username}:{expires_at}"
+    expected_signature = hmac.new(
+        admin_session_secret().encode("utf-8"),
+        payload.encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(token_signature, expected_signature):
+        return False
+    if not hmac.compare_digest(token_username, username):
+        return False
+    return expires_at >= int(datetime.now().timestamp())
+
+
+def ensure_admin(request: Request) -> None:
+    if not is_admin_authenticated(request):
+        raise HTTPException(status_code=401, detail="Autenticacao administrativa necessaria.")
+
+
+def should_set_secure_cookie(request: Request) -> bool:
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    if "https" in forwarded_proto.lower():
+        return True
+    return request.url.scheme == "https"
 
 
 def build_recent_report_item(report_id: str, filename: str, payload: dict[str, Any]) -> dict[str, Any]:

@@ -20,6 +20,12 @@ class WebAppTests(unittest.TestCase):
     def setUp(self):
         REPORTS.clear()
 
+    def login_admin(self, client: TestClient, username: str = "admin", password: str = "secret123"):
+        return client.post(
+            "/api/admin/session",
+            json={"username": username, "password": password},
+        )
+
     def test_process_endpoint_returns_summary(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "fev2026.pdf"
         client = TestClient(app)
@@ -105,13 +111,37 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_admin_page_redirects_when_not_authenticated(self):
+        client = TestClient(app)
+
+        response = client.get("/admin", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/admin/login")
+
+    def test_admin_login_sets_session_cookie(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            response = self.login_admin(client)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("agent_admin_session", response.headers.get("set-cookie", ""))
+
+    def test_settings_requires_admin_authentication(self):
+        client = TestClient(app)
+
+        response = client.get("/api/settings")
+
+        self.assertEqual(response.status_code, 401)
+
     def test_healthcheck_returns_security_headers(self):
         client = TestClient(app)
 
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.2.0")
+        self.assertEqual(response.json()["version"], "1.3.0")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
 
@@ -124,7 +154,8 @@ class WebAppTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("conferir_ponto.settings.SETTINGS_PATH", settings_path):
+            with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch("conferir_ponto.settings.SETTINGS_PATH", settings_path):
+                self.login_admin(client)
                 response = client.get("/api/settings")
 
         self.assertEqual(response.status_code, 200)
@@ -136,7 +167,8 @@ class WebAppTests(unittest.TestCase):
         client = TestClient(app)
         with TemporaryDirectory() as temp_dir:
             settings_path = Path(temp_dir) / "apuracao.json"
-            with patch("conferir_ponto.settings.SETTINGS_PATH", settings_path):
+            with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch("conferir_ponto.settings.SETTINGS_PATH", settings_path):
+                self.login_admin(client)
                 response = client.put(
                     "/api/settings",
                     json={

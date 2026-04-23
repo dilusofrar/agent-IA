@@ -210,7 +210,7 @@
 
   async function fetchSettings() {
     try {
-      const response = await fetch("/api/settings", { method: "GET" });
+      const response = await fetch("/api/settings/public", { method: "GET" });
       if (!response.ok) {
         throw new Error("Falha ao carregar regras");
       }
