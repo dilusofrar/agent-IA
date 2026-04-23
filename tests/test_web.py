@@ -19,6 +19,16 @@ from conferir_ponto.web import REPORTS, app, sanitize_download_name
 class WebAppTests(unittest.TestCase):
     def setUp(self):
         REPORTS.clear()
+        self._temp_dir = TemporaryDirectory()
+        self._db_patcher = patch(
+            "conferir_ponto.persistence.APP_DB_PATH",
+            Path(self._temp_dir.name) / "app.db",
+        )
+        self._db_patcher.start()
+
+    def tearDown(self):
+        self._db_patcher.stop()
+        self._temp_dir.cleanup()
 
     def login_admin(self, client: TestClient, username: str = "admin", password: str = "secret123"):
         return client.post(
@@ -141,7 +151,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.5.0")
+        self.assertEqual(response.json()["version"], "1.6.0")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
 

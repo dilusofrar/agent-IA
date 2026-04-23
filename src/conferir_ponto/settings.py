@@ -6,6 +6,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from conferir_ponto.persistence import (
+    append_settings_audit_entry,
+    load_current_settings_payload,
+    load_settings_audit_entries,
+    save_current_settings_payload,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 SETTINGS_PATH = BASE_DIR / "data" / "settings" / "apuracao.json"
@@ -120,18 +127,23 @@ def ensure_settings_file() -> None:
 
 
 def load_settings() -> ApuracaoSettings:
-    ensure_settings_file()
-    raw_payload = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    raw_payload = load_current_settings_payload()
+    if raw_payload is None:
+        ensure_settings_file()
+        raw_payload = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+        save_current_settings_payload(raw_payload)
     return parse_settings_payload(raw_payload)
 
 
 def save_settings(raw_payload: dict[str, Any]) -> ApuracaoSettings:
     settings = parse_settings_payload(raw_payload)
+    persisted_payload = settings_to_payload(settings)
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(
-        json.dumps(settings_to_payload(settings), ensure_ascii=False, indent=2),
+        json.dumps(persisted_payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    save_current_settings_payload(persisted_payload)
     return settings
 
 
@@ -249,6 +261,9 @@ def normalize_journey_code(code: str) -> str:
 
 
 def load_settings_history(limit: int = 12) -> list[dict[str, Any]]:
+    db_items = load_settings_audit_entries(limit)
+    if db_items:
+        return db_items
     if not SETTINGS_HISTORY_PATH.exists():
         return []
 
@@ -285,6 +300,7 @@ def append_settings_history(
     }
     with SETTINGS_HISTORY_PATH.open("a", encoding="utf-8") as history_file:
         history_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    append_settings_audit_entry(entry)
     prune_settings_history()
     return entry
 

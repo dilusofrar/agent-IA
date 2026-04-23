@@ -17,6 +17,13 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from conferir_ponto.persistence import (
+    delete_report_record,
+    list_recent_report_records,
+    load_report_record,
+    stale_report_ids,
+    upsert_report_record,
+)
 from conferir_ponto.settings import (
     append_settings_history,
     load_settings,
@@ -37,7 +44,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
@@ -245,7 +252,7 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
         "recent": build_recent_report_item(report_id, file.filename, payload),
         "payload": payload,
     }
-    persist_report(report_id, REPORTS[report_id])
+    persist_report(report_id, REPORTS[report_id], source_pdf=content)
     prune_persisted_reports()
     LOGGER.info(
         "process_completed",
@@ -395,7 +402,11 @@ def pdf_path_for(report_id: str) -> Path:
     return ensure_reports_dir() / f"{report_id}.pdf"
 
 
-def persist_report(report_id: str, report: dict[str, Any]) -> None:
+def source_pdf_path_for(report_id: str) -> Path:
+    return ensure_reports_dir() / f"{report_id}.source.pdf"
+
+
+def persist_report(report_id: str, report: dict[str, Any], *, source_pdf: bytes | None = None) -> None:
     metadata = {
         "reportId": report_id,
         "filename": report["filename"],
@@ -407,13 +418,37 @@ def persist_report(report_id: str, report: dict[str, Any]) -> None:
         encoding="utf-8",
     )
     pdf_path_for(report_id).write_bytes(report["pdf"])
+    source_pdf_path = None
+    if source_pdf is not None:
+        source_path = source_pdf_path_for(report_id)
+        source_path.write_bytes(source_pdf)
+        source_pdf_path = str(source_path)
+    upsert_report_record(
+        report_id,
+        report["filename"],
+        report.get("recent", {}),
+        report.get("payload", {}),
+        source_pdf_path=source_pdf_path,
+        export_pdf_path=str(pdf_path_for(report_id)),
+    )
 
 
 def load_report_from_disk(report_id: str) -> dict[str, Any] | None:
     metadata_path = metadata_path_for(report_id)
     pdf_path = pdf_path_for(report_id)
     if not metadata_path.exists() or not pdf_path.exists():
-        return None
+        record = load_report_record(report_id)
+        resolved_pdf_path = Path(record["exportPdfPath"]) if record and record.get("exportPdfPath") else pdf_path
+        if record is None or not resolved_pdf_path.exists():
+            return None
+        report = {
+            "filename": record.get("filename", f"{report_id}.pdf"),
+            "pdf": resolved_pdf_path.read_bytes(),
+            "recent": record.get("recent", {}),
+            "payload": record.get("payload", {}),
+        }
+        REPORTS[report_id] = report
+        return report
 
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     report = {
@@ -428,6 +463,15 @@ def load_report_from_disk(report_id: str) -> dict[str, Any] | None:
 
 def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
+    seen_report_ids: set[str] = set()
+    db_items = list_recent_report_records(limit)
+    for recent in db_items:
+        report_id = recent.get("reportId") if recent else None
+        if recent and report_id and report_id not in seen_report_ids:
+            items.append(recent)
+            seen_report_ids.add(report_id)
+    if len(items) >= limit:
+        return items[:limit]
     if REPORTS_DIR.exists():
         for metadata_path in sorted(
             REPORTS_DIR.glob("*.json"),
@@ -439,8 +483,10 @@ def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str
             except json.JSONDecodeError:
                 continue
             recent = metadata.get("recent")
-            if recent:
+            report_id = recent.get("reportId") if recent else None
+            if recent and report_id and report_id not in seen_report_ids:
                 items.append(recent)
+                seen_report_ids.add(report_id)
             if len(items) >= limit:
                 break
 
@@ -448,9 +494,11 @@ def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str
         recent = report.get("recent")
         if not recent:
             continue
-        if any(item.get("reportId") == recent.get("reportId") for item in items):
+        report_id = recent.get("reportId")
+        if not report_id or report_id in seen_report_ids:
             continue
         items.append(recent)
+        seen_report_ids.add(report_id)
         if len(items) >= limit:
             break
 
@@ -459,6 +507,15 @@ def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str
 
 
 def prune_persisted_reports() -> None:
+    stale_ids = stale_report_ids(MAX_STORED_REPORTS)
+    for report_id in stale_ids:
+        delete_report_record(report_id)
+        try:
+            metadata_path_for(report_id).unlink(missing_ok=True)
+            pdf_path_for(report_id).unlink(missing_ok=True)
+            source_pdf_path_for(report_id).unlink(missing_ok=True)
+        except OSError:
+            LOGGER.warning("persisted_report_cleanup_failed", extra={"report_id": report_id})
     if not REPORTS_DIR.exists():
         return
     metadata_files = sorted(
@@ -471,5 +528,6 @@ def prune_persisted_reports() -> None:
         try:
             stale_path.unlink(missing_ok=True)
             pdf_path_for(report_id).unlink(missing_ok=True)
+            source_pdf_path_for(report_id).unlink(missing_ok=True)
         except OSError:
             LOGGER.warning("persisted_report_cleanup_failed", extra={"report_id": report_id})
