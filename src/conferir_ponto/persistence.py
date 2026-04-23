@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS reports (
     processing_duration_ms INTEGER,
     recent_json TEXT NOT NULL,
     payload_json TEXT NOT NULL,
+    source_pdf_key TEXT,
+    export_pdf_key TEXT,
     source_pdf_path TEXT,
     export_pdf_path TEXT
 );
@@ -66,10 +68,23 @@ def ensure_app_db() -> Path:
     connection = sqlite3.connect(APP_DB_PATH)
     try:
         connection.executescript(SCHEMA_SQL)
+        ensure_column(connection, "reports", "source_pdf_key", "TEXT")
+        ensure_column(connection, "reports", "export_pdf_key", "TEXT")
         connection.commit()
     finally:
         connection.close()
     return APP_DB_PATH
+
+
+def ensure_column(connection: sqlite3.Connection, table_name: str, column_name: str, column_type: str) -> None:
+    columns = {
+        row[1]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        connection.execute(
+            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
+        )
 
 
 @contextmanager
@@ -158,6 +173,8 @@ def upsert_report_record(
     recent: dict[str, Any],
     payload: dict[str, Any],
     *,
+    source_pdf_key: str | None = None,
+    export_pdf_key: str | None = None,
     source_pdf_path: str | None = None,
     export_pdf_path: str | None = None,
 ) -> None:
@@ -180,10 +197,12 @@ def upsert_report_record(
                 processing_duration_ms,
                 recent_json,
                 payload_json,
+                source_pdf_key,
+                export_pdf_key,
                 source_pdf_path,
                 export_pdf_path
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(report_id) DO UPDATE SET
                 filename = excluded.filename,
                 employee_name = excluded.employee_name,
@@ -194,6 +213,8 @@ def upsert_report_record(
                 processing_duration_ms = excluded.processing_duration_ms,
                 recent_json = excluded.recent_json,
                 payload_json = excluded.payload_json,
+                source_pdf_key = excluded.source_pdf_key,
+                export_pdf_key = excluded.export_pdf_key,
                 source_pdf_path = excluded.source_pdf_path,
                 export_pdf_path = excluded.export_pdf_path
             """,
@@ -208,6 +229,8 @@ def upsert_report_record(
                 payload.get("meta", {}).get("processingDurationMs"),
                 json.dumps(recent, ensure_ascii=False),
                 json.dumps(payload, ensure_ascii=False),
+                source_pdf_key,
+                export_pdf_key,
                 source_pdf_path,
                 export_pdf_path,
             ),
@@ -220,7 +243,7 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
     with open_db() as connection:
         row = connection.execute(
             """
-            SELECT filename, recent_json, payload_json, source_pdf_path, export_pdf_path
+            SELECT filename, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
             FROM reports
             WHERE report_id = ?
             """,
@@ -233,6 +256,8 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
         "filename": row["filename"],
         "recent": json.loads(row["recent_json"]),
         "payload": json.loads(row["payload_json"]),
+        "sourcePdfKey": row["source_pdf_key"],
+        "exportPdfKey": row["export_pdf_key"],
         "sourcePdfPath": row["source_pdf_path"],
         "exportPdfPath": row["export_pdf_path"],
     }

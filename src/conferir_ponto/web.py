@@ -31,6 +31,7 @@ from conferir_ponto.settings import (
     save_settings,
     settings_to_payload,
 )
+from conferir_ponto.storage import LocalReportStorage, build_report_object_key
 from conferir_ponto.timecard import (
     build_summary_payload,
     export_analysis_to_pdf,
@@ -44,7 +45,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
@@ -394,66 +395,76 @@ def ensure_reports_dir() -> Path:
     return REPORTS_DIR
 
 
-def metadata_path_for(report_id: str) -> Path:
-    return ensure_reports_dir() / f"{report_id}.json"
+def report_storage() -> LocalReportStorage:
+    return LocalReportStorage(ensure_reports_dir())
 
 
-def pdf_path_for(report_id: str) -> Path:
-    return ensure_reports_dir() / f"{report_id}.pdf"
+def metadata_object_key(report_id: str) -> str:
+    return build_report_object_key(report_id, "metadata.json")
 
 
-def source_pdf_path_for(report_id: str) -> Path:
-    return ensure_reports_dir() / f"{report_id}.source.pdf"
+def export_pdf_object_key(report_id: str) -> str:
+    return build_report_object_key(report_id, "export.pdf")
+
+
+def source_pdf_object_key(report_id: str) -> str:
+    return build_report_object_key(report_id, "source.pdf")
 
 
 def persist_report(report_id: str, report: dict[str, Any], *, source_pdf: bytes | None = None) -> None:
+    storage = report_storage()
     metadata = {
         "reportId": report_id,
         "filename": report["filename"],
         "recent": report.get("recent", {}),
         "payload": report.get("payload", {}),
     }
-    metadata_path_for(report_id).write_text(
-        json.dumps(metadata, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    metadata_result = storage.write_bytes(
+        metadata_object_key(report_id),
+        json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"),
     )
-    pdf_path_for(report_id).write_bytes(report["pdf"])
+    export_result = storage.write_bytes(export_pdf_object_key(report_id), report["pdf"])
+    source_result = None
     source_pdf_path = None
     if source_pdf is not None:
-        source_path = source_pdf_path_for(report_id)
-        source_path.write_bytes(source_pdf)
-        source_pdf_path = str(source_path)
+        source_result = storage.write_bytes(source_pdf_object_key(report_id), source_pdf)
+        source_pdf_path = source_result.location
     upsert_report_record(
         report_id,
         report["filename"],
         report.get("recent", {}),
         report.get("payload", {}),
+        source_pdf_key=source_result.key if source_result else None,
+        export_pdf_key=export_result.key,
         source_pdf_path=source_pdf_path,
-        export_pdf_path=str(pdf_path_for(report_id)),
+        export_pdf_path=export_result.location,
     )
 
 
 def load_report_from_disk(report_id: str) -> dict[str, Any] | None:
-    metadata_path = metadata_path_for(report_id)
-    pdf_path = pdf_path_for(report_id)
-    if not metadata_path.exists() or not pdf_path.exists():
+    storage = report_storage()
+    metadata_bytes = storage.read_bytes(metadata_object_key(report_id))
+    export_bytes = storage.read_bytes(export_pdf_object_key(report_id))
+    if metadata_bytes is None or export_bytes is None:
         record = load_report_record(report_id)
-        resolved_pdf_path = Path(record["exportPdfPath"]) if record and record.get("exportPdfPath") else pdf_path
-        if record is None or not resolved_pdf_path.exists():
+        export_key = record.get("exportPdfKey") if record else None
+        if record and export_key:
+            export_bytes = storage.read_bytes(export_key)
+        if record is None or export_bytes is None:
             return None
         report = {
             "filename": record.get("filename", f"{report_id}.pdf"),
-            "pdf": resolved_pdf_path.read_bytes(),
+            "pdf": export_bytes,
             "recent": record.get("recent", {}),
             "payload": record.get("payload", {}),
         }
         REPORTS[report_id] = report
         return report
 
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata = json.loads(metadata_bytes.decode("utf-8"))
     report = {
         "filename": metadata.get("filename", f"{report_id}.pdf"),
-        "pdf": pdf_path.read_bytes(),
+        "pdf": export_bytes,
         "recent": metadata.get("recent", {}),
         "payload": metadata.get("payload", {}),
     }
@@ -474,7 +485,7 @@ def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str
         return items[:limit]
     if REPORTS_DIR.exists():
         for metadata_path in sorted(
-            REPORTS_DIR.glob("*.json"),
+            REPORTS_DIR.glob("reports/*/metadata.json"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         ):
@@ -508,26 +519,27 @@ def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str
 
 def prune_persisted_reports() -> None:
     stale_ids = stale_report_ids(MAX_STORED_REPORTS)
+    storage = report_storage()
     for report_id in stale_ids:
         delete_report_record(report_id)
         try:
-            metadata_path_for(report_id).unlink(missing_ok=True)
-            pdf_path_for(report_id).unlink(missing_ok=True)
-            source_pdf_path_for(report_id).unlink(missing_ok=True)
+            storage.delete(metadata_object_key(report_id))
+            storage.delete(export_pdf_object_key(report_id))
+            storage.delete(source_pdf_object_key(report_id))
         except OSError:
             LOGGER.warning("persisted_report_cleanup_failed", extra={"report_id": report_id})
     if not REPORTS_DIR.exists():
         return
     metadata_files = sorted(
-        REPORTS_DIR.glob("*.json"),
+        REPORTS_DIR.glob("reports/*/metadata.json"),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
     )
     for stale_path in metadata_files[MAX_STORED_REPORTS:]:
-        report_id = stale_path.stem
+        report_id = stale_path.parent.name
         try:
-            stale_path.unlink(missing_ok=True)
-            pdf_path_for(report_id).unlink(missing_ok=True)
-            source_pdf_path_for(report_id).unlink(missing_ok=True)
+            storage.delete(metadata_object_key(report_id))
+            storage.delete(export_pdf_object_key(report_id))
+            storage.delete(source_pdf_object_key(report_id))
         except OSError:
             LOGGER.warning("persisted_report_cleanup_failed", extra={"report_id": report_id})

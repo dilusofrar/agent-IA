@@ -9,6 +9,8 @@ CREATE TABLE reports (
     processing_duration_ms INTEGER,
     recent_json TEXT NOT NULL,
     payload_json TEXT NOT NULL,
+    source_pdf_key TEXT,
+    export_pdf_key TEXT,
     source_pdf_path TEXT,
     export_pdf_path TEXT
 );

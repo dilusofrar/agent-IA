@@ -151,7 +151,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.6.0")
+        self.assertEqual(response.json()["version"], "1.7.0")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
 
@@ -348,11 +348,13 @@ class WebAppTests(unittest.TestCase):
         client = TestClient(app)
         with TemporaryDirectory() as temp_dir:
             reports_dir = Path(temp_dir)
-            reports_dir.joinpath("older.json").write_text(
+            reports_dir.joinpath("reports", "older").mkdir(parents=True)
+            reports_dir.joinpath("reports", "older", "metadata.json").write_text(
                 '{"reportId":"older","filename":"older.pdf","recent":{"reportId":"older","filename":"older.pdf","employeeName":"Mais antigo","createdAt":"2026-04-22T10:00:00","summary":{"balance":"00:10","inconsistencyCount":1,"paidOvertime":"00:00","businessDaysProcessed":20},"diagnostics":{}}}',
                 encoding="utf-8",
             )
-            reports_dir.joinpath("newer.json").write_text(
+            reports_dir.joinpath("reports", "newer").mkdir(parents=True)
+            reports_dir.joinpath("reports", "newer", "metadata.json").write_text(
                 '{"reportId":"newer","filename":"newer.pdf","recent":{"reportId":"newer","filename":"newer.pdf","employeeName":"Mais novo","createdAt":"2026-04-23T10:00:00","summary":{"balance":"01:00","inconsistencyCount":0,"paidOvertime":"02:00","businessDaysProcessed":21},"diagnostics":{}}}',
                 encoding="utf-8",
             )
@@ -369,11 +371,12 @@ class WebAppTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             reports_dir = Path(temp_dir)
             report_id = "persisted-report"
-            reports_dir.joinpath(f"{report_id}.json").write_text(
+            reports_dir.joinpath("reports", report_id).mkdir(parents=True)
+            reports_dir.joinpath("reports", report_id, "metadata.json").write_text(
                 '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report","filename":"persisted.pdf","createdAt":"2026-04-23T10:00:00","summary":{"balance":"00:00","inconsistencyCount":0,"paidOvertime":"00:00","businessDaysProcessed":1},"diagnostics":{}},"payload":{"reportId":"persisted-report","employeeName":"Persistido"}}',
                 encoding="utf-8",
             )
-            reports_dir.joinpath(f"{report_id}.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
+            reports_dir.joinpath("reports", report_id, "export.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
 
             with patch("conferir_ponto.web.REPORTS_DIR", reports_dir):
                 response = client.get(f"/api/export/{report_id}")
@@ -388,11 +391,12 @@ class WebAppTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             reports_dir = Path(temp_dir)
             report_id = "persisted-report"
-            reports_dir.joinpath(f"{report_id}.json").write_text(
+            reports_dir.joinpath("reports", report_id).mkdir(parents=True)
+            reports_dir.joinpath("reports", report_id, "metadata.json").write_text(
                 '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report"},"payload":{"reportId":"persisted-report","employeeName":"Persistido","summary":{"businessDaysProcessed":3}}}',
                 encoding="utf-8",
             )
-            reports_dir.joinpath(f"{report_id}.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
+            reports_dir.joinpath("reports", report_id, "export.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
 
             with patch("conferir_ponto.web.REPORTS_DIR", reports_dir):
                 response = client.get(f"/api/reports/{report_id}")
@@ -462,9 +466,10 @@ class WebAppTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             response_payload = response.json()
             report_id = response_payload["reportId"]
-            persisted_metadata = Path(temp_dir, f"{report_id}.json")
+            persisted_metadata = Path(temp_dir, "reports", report_id, "metadata.json")
             self.assertTrue(persisted_metadata.exists())
-            self.assertTrue(Path(temp_dir, f"{report_id}.pdf").exists())
+            self.assertTrue(Path(temp_dir, "reports", report_id, "export.pdf").exists())
+            self.assertTrue(Path(temp_dir, "reports", report_id, "source.pdf").exists())
             self.assertIn('"payload"', persisted_metadata.read_text(encoding="utf-8"))
             self.assertIn(response_payload["reportId"], persisted_metadata.read_text(encoding="utf-8"))
 

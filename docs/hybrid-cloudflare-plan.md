@@ -6,7 +6,7 @@ metadata and settings persistence for a future move to Cloudflare D1 + R2.
 ## Current split
 
 - Render: FastAPI app, PDF parsing, report generation.
-- Local filesystem: generated/exported report files and uploaded source PDFs.
+- Storage abstraction: report/source files are stored behind a local object-like storage layer.
 - SQLite metadata store: local development and Render-compatible stand-in for D1.
 
 ## D1-ready tables
@@ -24,13 +24,14 @@ See [d1-schema.sql](/D:/diegoluks/CONFERIR%20PONTO/docs/d1-schema.sql).
 
 - `reports/{report_id}/source.pdf`
 - `reports/{report_id}/export.pdf`
+- `reports/{report_id}/metadata.json`
 
-The current local filesystem paths are kept in metadata so the app can transition
-to R2 object keys later without changing the higher-level report model.
+The current local storage already uses these logical keys, so the next R2 step is
+mainly a backend adapter swap instead of a route/model redesign.
 
 ## Next migration steps
 
-1. Replace local PDF/source file persistence with R2 object writes.
+1. Replace the local storage adapter with R2 object writes.
 2. Switch recent reports and settings audit reads from local SQLite to D1.
 3. Move admin and user authentication to the `users` table.
 4. Add report ownership so common users only see their own history.
