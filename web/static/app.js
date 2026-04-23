@@ -9,6 +9,7 @@ const issuesListEl = document.getElementById("issues-list");
 const daysTableEl = document.getElementById("days-table");
 const inconsistencyCountEl = document.getElementById("inconsistency-count");
 const exportLinkEl = document.getElementById("export-link");
+const inlineStatusEl = document.getElementById("status-inline");
 const dropzoneEl = document.querySelector(".dropzone");
 const dropzoneTitleEl = dropzoneEl.querySelector("strong");
 const dropzoneTextEl = dropzoneEl.querySelector("span");
@@ -42,6 +43,13 @@ form.addEventListener("submit", async (event) => {
 function setStatus(message, mode) {
   statusEl.textContent = message;
   statusEl.className = `status ${mode}`;
+  if (mode === "success") {
+    inlineStatusEl.textContent = message;
+    inlineStatusEl.className = `status status-inline ${mode}`;
+  } else {
+    inlineStatusEl.textContent = "";
+    inlineStatusEl.className = "status-inline hidden";
+  }
 }
 
 function renderPayload(payload) {
