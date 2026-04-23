@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
+from uuid import uuid4
 
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -300,3 +301,159 @@ def delete_report_record(report_id: str) -> None:
         return
     with open_db() as connection:
         connection.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
+
+
+def load_user_by_username(username: str) -> dict[str, Any] | None:
+    if not APP_DB_PATH.exists():
+        return None
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        return None
+    with open_db() as connection:
+        row = connection.execute(
+            """
+            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            FROM users
+            WHERE username = ?
+            """,
+            (normalized_username,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "email": row["email"],
+        "displayName": row["display_name"],
+        "passwordHash": row["password_hash"],
+        "role": row["role"],
+        "isActive": bool(row["is_active"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def list_users(limit: int = 100) -> list[dict[str, Any]]:
+    if not APP_DB_PATH.exists():
+        return []
+    with open_db() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, username, email, display_name, role, is_active, created_at, updated_at
+            FROM users
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "username": row["username"],
+            "email": row["email"],
+            "displayName": row["display_name"],
+            "role": row["role"],
+            "isActive": bool(row["is_active"]),
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def create_user(
+    *,
+    username: str,
+    password_hash: str,
+    role: str = "user",
+    email: str | None = None,
+    display_name: str | None = None,
+    is_active: bool = True,
+) -> dict[str, Any]:
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        raise ValueError("Nome de usuário é obrigatório.")
+    now = datetime.now().isoformat(timespec="seconds")
+    user_id = uuid4().hex
+    with open_db() as connection:
+        existing = connection.execute(
+            "SELECT 1 FROM users WHERE username = ?",
+            (normalized_username,),
+        ).fetchone()
+        if existing is not None:
+            raise ValueError("Usuário já existe.")
+        connection.execute(
+            """
+            INSERT INTO users (
+                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                normalized_username,
+                email,
+                display_name,
+                password_hash,
+                role,
+                1 if is_active else 0,
+                now,
+                now,
+            ),
+        )
+    return load_user_by_username(normalized_username) or {}
+
+
+def upsert_user(
+    *,
+    username: str,
+    password_hash: str,
+    role: str = "user",
+    email: str | None = None,
+    display_name: str | None = None,
+    is_active: bool = True,
+) -> dict[str, Any]:
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        raise ValueError("Nome de usuário é obrigatório.")
+    existing = load_user_by_username(normalized_username)
+    now = datetime.now().isoformat(timespec="seconds")
+    with open_db() as connection:
+        if existing is None:
+            connection.execute(
+                """
+                INSERT INTO users (
+                    id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    uuid4().hex,
+                    normalized_username,
+                    email,
+                    display_name,
+                    password_hash,
+                    role,
+                    1 if is_active else 0,
+                    now,
+                    now,
+                ),
+            )
+        else:
+            connection.execute(
+                """
+                UPDATE users
+                SET email = ?, display_name = ?, password_hash = ?, role = ?, is_active = ?, updated_at = ?
+                WHERE username = ?
+                """,
+                (
+                    email,
+                    display_name,
+                    password_hash,
+                    role,
+                    1 if is_active else 0,
+                    now,
+                    normalized_username,
+                ),
+            )
+    return load_user_by_username(normalized_username) or {}

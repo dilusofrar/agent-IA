@@ -13,8 +13,9 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from conferir_ponto.persistence import create_user
 from conferir_ponto.storage import LocalReportStorage, storage_from_env
-from conferir_ponto.web import REPORTS, app, sanitize_download_name
+from conferir_ponto.web import REPORTS, app, hash_password, sanitize_download_name
 import conferir_ponto.web as web_module
 
 
@@ -142,6 +143,22 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("agent_admin_session", response.headers.get("set-cookie", ""))
 
+    def test_database_backed_admin_login_sets_session_cookie(self):
+        client = TestClient(app)
+        create_user(
+            username="dbadmin",
+            password_hash=hash_password("secret123"),
+            role="admin",
+            display_name="DB Admin",
+        )
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": ""}, clear=False):
+            response = self.login_admin(client, username="dbadmin", password="secret123")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["user"]["username"], "dbadmin")
+        self.assertIn("agent_admin_session", response.headers.get("set-cookie", ""))
+
     def test_settings_requires_admin_authentication(self):
         client = TestClient(app)
 
@@ -149,13 +166,37 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_admin_can_create_and_list_users(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            create_response = client.post(
+                "/api/admin/users",
+                json={
+                    "username": "operador",
+                    "password": "senha123",
+                    "role": "user",
+                    "displayName": "Operador",
+                    "email": "operador@example.com",
+                },
+            )
+            list_response = client.get("/api/admin/users")
+
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.json()["username"], "operador")
+        self.assertEqual(create_response.json()["role"], "user")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertGreaterEqual(list_response.json()["count"], 2)
+        self.assertIn("operador", [item["username"] for item in list_response.json()["items"]])
+
     def test_healthcheck_returns_security_headers(self):
         client = TestClient(app)
 
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.8.0")
+        self.assertEqual(response.json()["version"], "1.9.0")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])

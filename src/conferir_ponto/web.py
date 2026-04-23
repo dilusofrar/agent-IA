@@ -7,6 +7,7 @@ import hmac
 import json
 import logging
 import os
+import secrets
 from time import perf_counter
 from pathlib import Path
 import re
@@ -18,10 +19,14 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from conferir_ponto.persistence import (
+    create_user,
     delete_report_record,
+    list_users,
     list_recent_report_records,
     load_report_record,
+    load_user_by_username,
     stale_report_ids,
+    upsert_user,
     upsert_report_record,
 )
 from conferir_ponto.settings import (
@@ -45,9 +50,10 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.9.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
+PASSWORD_HASH_ITERATIONS = 390000
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "").strip().lower() in {"1", "true", "yes", "on"}
 SECURITY_HEADERS = {
@@ -127,21 +133,19 @@ async def admin_session_status(request: Request) -> JSONResponse:
 
 @app.post("/api/admin/session")
 async def admin_session_login(request: Request, payload: dict[str, Any]) -> JSONResponse:
-    username, password = get_admin_credentials()
     provided_username = str(payload.get("username", "")).strip()
     provided_password = str(payload.get("password", ""))
-    if not password:
-        raise HTTPException(status_code=503, detail="Painel administrativo nao configurado.")
-    if not (
-        hmac.compare_digest(provided_username, username)
-        and hmac.compare_digest(provided_password, password)
-    ):
+    admin_user = authenticate_admin_user(provided_username, provided_password)
+    if admin_user is None:
+        _, password = get_admin_credentials()
+        if not password:
+            raise HTTPException(status_code=503, detail="Painel administrativo nao configurado.")
         raise HTTPException(status_code=401, detail="Credenciais invalidas.")
 
-    response = JSONResponse({"authenticated": True})
+    response = JSONResponse({"authenticated": True, "user": sanitize_user(admin_user)})
     response.set_cookie(
         key=ADMIN_SESSION_COOKIE,
-        value=create_admin_session_token(username),
+        value=create_admin_session_token(admin_user["username"]),
         httponly=True,
         samesite="lax",
         max_age=ADMIN_SESSION_TTL_SECONDS,
@@ -155,6 +159,37 @@ async def admin_session_logout() -> JSONResponse:
     response = JSONResponse({"authenticated": False})
     response.delete_cookie(ADMIN_SESSION_COOKIE, httponly=True, samesite="lax")
     return response
+
+
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request) -> JSONResponse:
+    ensure_admin(request)
+    items = list_users()
+    return JSONResponse({"items": items, "count": len(items)})
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(request: Request, payload: dict[str, Any]) -> JSONResponse:
+    ensure_admin(request)
+    username = str(payload.get("username", "")).strip()
+    password = str(payload.get("password", ""))
+    role = str(payload.get("role", "user")).strip().lower() or "user"
+    if role not in {"admin", "user"}:
+        raise HTTPException(status_code=400, detail="Perfil inválido.")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Usuário e senha são obrigatórios.")
+    try:
+        user = create_user(
+            username=username,
+            password_hash=hash_password(password),
+            role=role,
+            email=str(payload.get("email", "")).strip() or None,
+            display_name=str(payload.get("displayName", "")).strip() or None,
+            is_active=bool(payload.get("isActive", True)),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return JSONResponse(sanitize_user(user), status_code=201)
 
 
 @app.get("/api/reports/recent")
@@ -300,11 +335,92 @@ def sanitize_download_name(filename: str) -> str:
     return sanitized or "relatorio"
 
 
+def sanitize_user(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": user.get("id"),
+        "username": user.get("username"),
+        "email": user.get("email"),
+        "displayName": user.get("displayName"),
+        "role": user.get("role"),
+        "isActive": bool(user.get("isActive", False)),
+        "createdAt": user.get("createdAt"),
+        "updatedAt": user.get("updatedAt"),
+    }
+
+
+def hash_password(password: str, *, salt: str | None = None) -> str:
+    normalized_password = str(password or "")
+    if not normalized_password:
+        raise ValueError("Senha é obrigatória.")
+    effective_salt = salt or secrets.token_hex(16)
+    digest = sha256(
+        normalized_password.encode("utf-8") + effective_salt.encode("utf-8")
+    ).hexdigest()
+    for _ in range(PASSWORD_HASH_ITERATIONS // 1000):
+        digest = sha256((digest + effective_salt).encode("utf-8")).hexdigest()
+    return f"sha256${PASSWORD_HASH_ITERATIONS}${effective_salt}${digest}"
+
+
+def verify_password(password: str, stored_hash: str | None) -> bool:
+    if not stored_hash:
+        return False
+    try:
+        algorithm, iterations, salt, expected_digest = stored_hash.split("$", 3)
+    except ValueError:
+        return False
+    if algorithm != "sha256":
+        return False
+    digest = sha256(str(password or "").encode("utf-8") + salt.encode("utf-8")).hexdigest()
+    for _ in range(int(iterations) // 1000):
+        digest = sha256((digest + salt).encode("utf-8")).hexdigest()
+    return hmac.compare_digest(digest, expected_digest)
+
+
 def get_admin_credentials() -> tuple[str, str]:
     return (
         os.getenv("ADMIN_USERNAME", "admin").strip() or "admin",
         os.getenv("ADMIN_PASSWORD", "").strip(),
     )
+
+
+def sync_admin_user_from_env() -> dict[str, Any] | None:
+    username, password = get_admin_credentials()
+    if not password:
+        return None
+    existing_user = load_user_by_username(username)
+    needs_sync = existing_user is None or existing_user.get("role") != "admin"
+    if existing_user is not None and existing_user.get("passwordHash"):
+        needs_sync = not verify_password(password, existing_user.get("passwordHash"))
+    if not needs_sync:
+        return existing_user
+    return upsert_user(
+        username=username,
+        password_hash=hash_password(password),
+        role="admin",
+        display_name=username,
+        is_active=True,
+    )
+
+
+def authenticate_admin_user(username: str, password: str) -> dict[str, Any] | None:
+    sync_admin_user_from_env()
+    user = load_user_by_username(username)
+    if user and user.get("isActive") and user.get("role") == "admin":
+        if verify_password(password, user.get("passwordHash")):
+            return user
+    env_username, env_password = get_admin_credentials()
+    if env_password and hmac.compare_digest(username, env_username) and hmac.compare_digest(password, env_password):
+        return {
+            "id": None,
+            "username": env_username,
+            "displayName": env_username,
+            "email": None,
+            "role": "admin",
+            "isActive": True,
+            "createdAt": None,
+            "updatedAt": None,
+        }
+    return None
 
 
 def admin_session_secret() -> str:
@@ -328,9 +444,9 @@ def create_admin_session_token(username: str) -> str:
 
 
 def is_admin_authenticated(request: Request) -> bool:
+    sync_admin_user_from_env()
     username, password = get_admin_credentials()
-    if not password:
-        return False
+    has_env_admin = bool(password)
     token = request.cookies.get(ADMIN_SESSION_COOKIE, "")
     if not token:
         return False
@@ -347,9 +463,14 @@ def is_admin_authenticated(request: Request) -> bool:
     ).hexdigest()
     if not hmac.compare_digest(token_signature, expected_signature):
         return False
-    if not hmac.compare_digest(token_username, username):
+    if expires_at < int(datetime.now().timestamp()):
         return False
-    return expires_at >= int(datetime.now().timestamp())
+    user = load_user_by_username(token_username)
+    if user is not None:
+        return bool(user.get("isActive")) and user.get("role") == "admin"
+    if has_env_admin and hmac.compare_digest(token_username, username):
+        return True
+    return False
 
 
 def ensure_admin(request: Request) -> None:
