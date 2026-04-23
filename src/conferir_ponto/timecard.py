@@ -48,7 +48,7 @@ STATUS_LABELS = {
     "RE": "Repouso",
     "NA": "Nao identificado",
 }
-PAID_NON_BUSINESS_STATUS_LABEL = "Extras Pagas"
+PAID_NON_BUSINESS_STATUS_LABEL = "Horas Pagas"
 
 
 @dataclass(frozen=True)
@@ -475,7 +475,19 @@ def calculate_day_metrics(
 
     if raw_day is None:
         if non_working_weekday or holiday_name:
-            return build_ignored_day(work_date, "NA", holiday_name, schedule=schedule)
+            fallback_status_code = "HP" if should_pay_non_business_day(
+                work_date=work_date,
+                status_code="NA",
+                holiday_name=holiday_name,
+                settings=settings,
+            ) else "NA"
+            return build_ignored_day(
+                work_date,
+                fallback_status_code,
+                holiday_name,
+                schedule=schedule,
+                journey_code=resolved_journey_code,
+            )
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
@@ -648,16 +660,21 @@ def build_ignored_day(
     raw_day: RawPunchDay | None = None,
     ignored_reason: str | None = None,
     schedule: WorkSchedule | None = None,
+    journey_code: str | None = None,
 ) -> DayMetrics:
     first_entry = raw_day.entries[0] if raw_day and raw_day.entries else None
     last_exit = raw_day.entries[-1] if raw_day and raw_day.entries else None
     return DayMetrics(
         work_date=work_date,
         weekday_label=weekday_pt(work_date),
-        journey_code=raw_day.journey_code if raw_day else None,
+        journey_code=journey_code or (raw_day.journey_code if raw_day else None),
         applied_schedule_label=format_schedule_label(schedule) if schedule else "-",
         status_code=status_code,
-        status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
+        status_label=(
+            PAID_NON_BUSINESS_STATUS_LABEL
+            if status_code == "HP"
+            else STATUS_LABELS.get(status_code, STATUS_LABELS["NA"])
+        ),
         first_entry=first_entry,
         last_exit=last_exit,
         worked_minutes=0,

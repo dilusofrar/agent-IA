@@ -87,7 +87,7 @@ TB
         self.assertEqual(format_minutes(sunday.overtime_before_lunch_minutes), "04:00")
         self.assertEqual(format_minutes(sunday.overtime_after_lunch_minutes), "04:00")
         self.assertEqual(sunday.journey_code, "0999")
-        self.assertEqual(sunday.status_label, "Extras Pagas")
+        self.assertEqual(sunday.status_label, "Horas Pagas")
         self.assertEqual(sunday.issues, [])
         self.assertEqual(summary["paidOvertime"], "08:00")
         self.assertEqual(summary["positiveBank"], "00:00")
@@ -185,7 +185,25 @@ CO
 
         self.assertEqual(saturday.journey_code, "0996")
         self.assertEqual(saturday.applied_schedule_label, "00:00-00:00 / 00:00-00:00")
-        self.assertEqual(saturday.status_label, "Extras Pagas")
+        self.assertEqual(saturday.status_label, "Horas Pagas")
+
+    def test_sunday_without_code_or_block_uses_0999_and_paid_status(self):
+        text = """
+Início Ponto: 05/04/2026
+Fim Ponto: 06/04/2026
+Matrícula: 1 - 1 TESTE USUARIO
+06 Seg
+0048
+TB
+07:45 o 12:00 i 13:00 o 17:00 i
+"""
+        analysis = parse_timecard_text(text)
+        sunday = next(day for day in analysis.days if day.work_date.isoformat() == "2026-04-05")
+
+        self.assertEqual(sunday.journey_code, "0999")
+        self.assertEqual(sunday.applied_schedule_label, "00:00-00:00 / 00:00-00:00")
+        self.assertEqual(sunday.status_label, "Horas Pagas")
+        self.assertTrue(sunday.ignored)
 
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"
@@ -200,7 +218,7 @@ CO
         self.assertFalse(december_13.ignored)
         self.assertTrue(december_13.included_in_totals)
         self.assertEqual(december_13.status_code, "CO")
-        self.assertEqual(december_13.status_label, "Extras Pagas")
+        self.assertEqual(december_13.status_label, "Horas Pagas")
         self.assertEqual(format_minutes(december_13.worked_minutes), "15:40")
         self.assertEqual(format_minutes(december_13.balance_minutes), "00:00")
         self.assertEqual(format_minutes(december_13.payable_overtime_minutes), "15:40")
