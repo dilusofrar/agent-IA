@@ -44,9 +44,11 @@ function setStatus(message, mode) {
   statusEl.textContent = message;
   statusEl.className = `status ${mode}`;
   if (mode === "success") {
+    statusEl.classList.add("hidden");
     inlineStatusEl.textContent = message;
     inlineStatusEl.className = `status status-inline ${mode}`;
   } else {
+    statusEl.classList.remove("hidden");
     inlineStatusEl.textContent = "";
     inlineStatusEl.className = "status-inline hidden";
   }
