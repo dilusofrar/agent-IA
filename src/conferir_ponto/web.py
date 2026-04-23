@@ -15,6 +15,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from conferir_ponto.settings import load_settings, save_settings, settings_to_payload
 from conferir_ponto.timecard import (
     build_summary_payload,
     export_analysis_to_pdf,
@@ -28,7 +29,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "").strip().lower() in {"1", "true", "yes", "on"}
 SECURITY_HEADERS = {
@@ -86,6 +87,20 @@ async def recent_reports() -> JSONResponse:
     return JSONResponse({"items": items, "count": len(items)})
 
 
+@app.get("/api/settings")
+async def get_settings() -> JSONResponse:
+    return JSONResponse(settings_to_payload(load_settings()))
+
+
+@app.put("/api/settings")
+async def update_settings(payload: dict[str, Any]) -> JSONResponse:
+    try:
+        settings = save_settings(payload)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(settings_to_payload(settings))
+
+
 @app.get("/api/reports/{report_id}")
 async def report_details(report_id: str) -> JSONResponse:
     report = REPORTS.get(report_id)
@@ -113,8 +128,9 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
             detail="O PDF excede o limite de 10 MB permitido para processamento.",
         )
 
+    settings = load_settings()
     try:
-        analysis = parse_timecard_bytes(content)
+        analysis = parse_timecard_bytes(content, settings=settings)
     except Exception as exc:
         LOGGER.warning(
             "process_failed",
@@ -127,6 +143,7 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     payload = build_summary_payload(analysis)
+    payload["settings"] = settings_to_payload(settings)
     report_id = uuid4().hex
     processing_duration_ms = int((perf_counter() - start_time) * 1000)
     created_at = datetime.now().isoformat(timespec="seconds")

@@ -24,11 +24,14 @@
   const filterGroup = document.getElementById("day-filter-group");
   const searchInput = document.getElementById("day-search");
   const tableStats = document.getElementById("table-stats");
+  const ruleSchedule = document.getElementById("rule-schedule");
+  const rulePaidHours = document.getElementById("rule-paid-hours");
 
   const state = {
     payload: null,
     filter: "all",
     query: "",
+    settings: null,
   };
 
   const summaryConfig = [
@@ -71,6 +74,7 @@
   }
 
   checkHealth();
+  fetchSettings();
   fetchRecentReports();
 
   if (dropzone && fileInput) {
@@ -204,6 +208,20 @@
     }
   }
 
+  async function fetchSettings() {
+    try {
+      const response = await fetch("/api/settings", { method: "GET" });
+      if (!response.ok) {
+        throw new Error("Falha ao carregar regras");
+      }
+      const payload = await response.json();
+      state.settings = payload;
+      renderSettingsSummary(payload);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   function setHealth(online, label) {
     if (!healthPill) return;
     healthPill.replaceChildren();
@@ -258,6 +276,10 @@
   }
 
   function renderPayload(payload, shouldScroll) {
+    if (payload.settings) {
+      state.settings = payload.settings;
+      renderSettingsSummary(payload.settings);
+    }
     state.payload = payload;
     state.filter = "all";
     state.query = "";
@@ -423,6 +445,34 @@
       recentList,
       items.map(renderRecentItem),
     );
+  }
+
+  function renderSettingsSummary(settings) {
+    if (ruleSchedule && settings && settings.defaultSchedule) {
+      const schedule = settings.defaultSchedule;
+      ruleSchedule.textContent =
+        "Jornada padrão " +
+        schedule.start +
+        "-" +
+        schedule.lunchStart +
+        " / " +
+        schedule.lunchEnd +
+        "-" +
+        schedule.end;
+    }
+
+    if (rulePaidHours && settings && settings.paidHours) {
+      const parts = [];
+      if (settings.paidHours.weekends) {
+        parts.push("sábado e domingo");
+      }
+      if (settings.paidHours.holidays) {
+        parts.push("feriado");
+      }
+      rulePaidHours.textContent =
+        (parts.length ? capitalize(parts.join(", ")) : "Dias não úteis") +
+        " com batida = hora paga";
+    }
   }
 
   function renderMetric(metric) {
@@ -752,6 +802,13 @@
       return "—";
     }
     return String(value).replace("T", " ");
+  }
+
+  function capitalize(value) {
+    if (!value) {
+      return "";
+    }
+    return value.charAt(0).toUpperCase() + value.slice(1);
   }
 
   function createIcon(label) {

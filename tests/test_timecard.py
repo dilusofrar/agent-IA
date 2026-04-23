@@ -9,6 +9,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from conferir_ponto.settings import ApuracaoSettings
 from conferir_ponto.timecard import (
     build_diagnostics_payload,
     build_summary_payload,
@@ -121,6 +122,27 @@ FERIAS
         self.assertEqual(diagnostics["ignoredBreakdown"][0]["label"], "Ferias")
         self.assertEqual(payload["diagnostics"]["ignoredDays"], 1)
         self.assertEqual(payload["meta"]["calendarDays"], 4)
+
+    def test_weekend_work_can_be_ignored_by_settings(self):
+        text = """
+Início Ponto: 01/03/2026
+Fim Ponto: 01/03/2026
+Matrícula: 1 - 1 TESTE USUARIO
+01 Dom
+RE
+08:00 o 12:00 i 13:00 o 17:00 i
+"""
+        settings = ApuracaoSettings(
+            payable_weekends=False,
+            payable_holidays=False,
+            payable_status_codes=(),
+        )
+        analysis = parse_timecard_text(text, settings=settings)
+        sunday = analysis.days[0]
+
+        self.assertTrue(sunday.ignored)
+        self.assertFalse(sunday.included_in_totals)
+        self.assertEqual(format_minutes(sunday.payable_overtime_minutes), "00:00")
 
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"

@@ -1,0 +1,30 @@
+{
+  "defaultSchedule": {
+    "start": "07:45",
+    "lunchStart": "12:00",
+    "lunchEnd": "13:00",
+    "end": "17:00"
+  },
+  "workingWeekdays": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "paidHours": {
+    "weekends": true,
+    "holidays": true,
+    "statusCodes": [
+      "CO",
+      "FE",
+      "RE"
+    ]
+  },
+  "journeyRules": {
+    "0004": {
+      "countOvertimeBeforeStart": false,
+      "lateToleranceMinutes": 5
+    }
+  }
+}

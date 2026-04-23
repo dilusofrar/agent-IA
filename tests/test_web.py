@@ -111,9 +111,62 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.1.0")
+        self.assertEqual(response.json()["version"], "1.2.0")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
+
+    def test_get_settings_returns_persisted_configuration(self):
+        client = TestClient(app)
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "apuracao.json"
+            settings_path.write_text(
+                '{"defaultSchedule":{"start":"08:00","lunchStart":"12:00","lunchEnd":"13:00","end":"17:30"},"workingWeekdays":[0,1,2,3,4],"paidHours":{"weekends":true,"holidays":true,"statusCodes":["CO","FE","RE"]},"journeyRules":{"0004":{"countOvertimeBeforeStart":false,"lateToleranceMinutes":7}}}',
+                encoding="utf-8",
+            )
+
+            with patch("conferir_ponto.settings.SETTINGS_PATH", settings_path):
+                response = client.get("/api/settings")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["defaultSchedule"]["start"], "08:00")
+        self.assertEqual(payload["journeyRules"]["0004"]["lateToleranceMinutes"], 7)
+
+    def test_put_settings_persists_configuration(self):
+        client = TestClient(app)
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / "apuracao.json"
+            with patch("conferir_ponto.settings.SETTINGS_PATH", settings_path):
+                response = client.put(
+                    "/api/settings",
+                    json={
+                        "defaultSchedule": {
+                            "start": "08:00",
+                            "lunchStart": "12:00",
+                            "lunchEnd": "13:00",
+                            "end": "17:30",
+                        },
+                        "workingWeekdays": [0, 1, 2, 3, 4],
+                        "paidHours": {
+                            "weekends": True,
+                            "holidays": True,
+                            "statusCodes": ["CO", "FE", "RE"],
+                        },
+                        "journeyRules": {
+                            "0004": {
+                                "countOvertimeBeforeStart": False,
+                                "lateToleranceMinutes": 9,
+                            }
+                        },
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertTrue(settings_path.exists())
+                persisted = settings_path.read_text(encoding="utf-8")
+
+        self.assertIn('"start": "08:00"', persisted)
+        self.assertIn('"lateToleranceMinutes": 9', persisted)
 
     def test_recent_reports_endpoint_returns_latest_items(self):
         client = TestClient(app)

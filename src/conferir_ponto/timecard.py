@@ -15,6 +15,8 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from conferir_ponto.settings import ApuracaoSettings
+
 
 PERIOD_PATTERN = re.compile(
     r"In[ií]cio Ponto:\s*(?P<start>\d{2}/\d{2}/\d{4}).*?Fim Ponto:\s*(?P<end>\d{2}/\d{2}/\d{4})",
@@ -148,18 +150,19 @@ def read_pdf_bytes_text(content: bytes) -> str:
         return "\n".join(page.get_text() for page in document)
 
 
-def parse_timecard_pdf(pdf_path: Path) -> TimeCardAnalysis:
-    return parse_timecard_text(read_pdf_text(pdf_path))
+def parse_timecard_pdf(pdf_path: Path, settings: ApuracaoSettings | None = None) -> TimeCardAnalysis:
+    return parse_timecard_text(read_pdf_text(pdf_path), settings=settings)
 
 
-def parse_timecard_bytes(content: bytes) -> TimeCardAnalysis:
-    return parse_timecard_text(read_pdf_bytes_text(content))
+def parse_timecard_bytes(content: bytes, settings: ApuracaoSettings | None = None) -> TimeCardAnalysis:
+    return parse_timecard_text(read_pdf_bytes_text(content), settings=settings)
 
 
-def parse_timecard_text(text: str) -> TimeCardAnalysis:
+def parse_timecard_text(text: str, settings: ApuracaoSettings | None = None) -> TimeCardAnalysis:
+    effective_settings = settings or ApuracaoSettings()
     period_start, period_end = extract_period_dates(text)
     employee_name = extract_employee_name(text)
-    schedule_map, schedule = extract_work_schedules(text)
+    schedule_map, schedule = extract_work_schedules(text, effective_settings)
     raw_days = parse_raw_days(text, period_start, period_end)
     day_map = {raw.work_date: raw for raw in raw_days}
 
@@ -170,7 +173,13 @@ def parse_timecard_text(text: str) -> TimeCardAnalysis:
         processed_at=datetime.now(),
         schedule=schedule,
         days=[
-            calculate_day_metrics(current_date, day_map.get(current_date), schedule_map, schedule)
+            calculate_day_metrics(
+                current_date,
+                day_map.get(current_date),
+                schedule_map,
+                schedule,
+                effective_settings,
+            )
             for current_date in daterange(period_start, period_end)
         ],
     )
@@ -193,8 +202,11 @@ def extract_employee_name(text: str) -> str | None:
     return " ".join(match.group("name").split())
 
 
-def extract_work_schedules(text: str) -> tuple[dict[str, WorkSchedule], WorkSchedule]:
-    working_weekdays = extract_working_weekdays(text)
+def extract_work_schedules(
+    text: str,
+    settings: ApuracaoSettings,
+) -> tuple[dict[str, WorkSchedule], WorkSchedule]:
+    working_weekdays = extract_working_weekdays(text, settings)
     source_match = TURN_PATTERN.search(text)
     source = source_match.group("line") if source_match else None
     schedule_map: dict[str, WorkSchedule] = {}
@@ -204,14 +216,16 @@ def extract_work_schedules(text: str) -> tuple[dict[str, WorkSchedule], WorkSche
         match = SCHEDULE_DEFINITION_PATTERN.match(line)
         if not match:
             continue
-        schedule_map[normalize_journey_code(match.group("code"))] = WorkSchedule(
+        normalized_code = normalize_journey_code(match.group("code"))
+        journey_rule = settings.rule_for(normalized_code)
+        schedule_map[normalized_code] = WorkSchedule(
             start=parse_clock(match.group("start")),
             lunch_start=parse_clock(match.group("lunch_start")),
             lunch_end=parse_clock(match.group("lunch_end")),
             end=parse_clock(match.group("end")),
             working_weekdays=working_weekdays,
-            count_overtime_before_start=normalize_journey_code(match.group("code")) != "0004",
-            late_tolerance_minutes=5 if normalize_journey_code(match.group("code")) == "0004" else 0,
+            count_overtime_before_start=journey_rule.count_overtime_before_start,
+            late_tolerance_minutes=journey_rule.late_tolerance_minutes,
             source=source,
         )
 
@@ -220,20 +234,20 @@ def extract_work_schedules(text: str) -> tuple[dict[str, WorkSchedule], WorkSche
         or schedule_map.get("0004")
         or next(iter(schedule_map.values()), None)
         or WorkSchedule(
-            start=time(7, 45),
-            lunch_start=time(12, 0),
-            lunch_end=time(13, 0),
-            end=time(17, 0),
+            start=parse_clock(settings.default_schedule_start),
+            lunch_start=parse_clock(settings.default_schedule_lunch_start),
+            lunch_end=parse_clock(settings.default_schedule_lunch_end),
+            end=parse_clock(settings.default_schedule_end),
             working_weekdays=working_weekdays,
-            count_overtime_before_start=True,
-            late_tolerance_minutes=0,
+            count_overtime_before_start=settings.rule_for(None).count_overtime_before_start,
+            late_tolerance_minutes=settings.rule_for(None).late_tolerance_minutes,
             source=source,
         )
     )
     return schedule_map, default_schedule
 
 
-def extract_working_weekdays(text: str) -> frozenset[int]:
+def extract_working_weekdays(text: str, settings: ApuracaoSettings) -> frozenset[int]:
     upper_text = text.upper()
     if "SEG A SEX" in upper_text or "SEG A SE" in upper_text or "SEG À SEX" in upper_text:
         return frozenset({0, 1, 2, 3, 4})
@@ -241,7 +255,7 @@ def extract_working_weekdays(text: str) -> frozenset[int]:
         return frozenset({0, 1, 2, 3, 4, 5})
     if "DOM A DOM" in upper_text:
         return frozenset({0, 1, 2, 3, 4, 5, 6})
-    return DEFAULT_WORKING_WEEKDAYS
+    return frozenset(settings.working_weekdays)
 
 
 def parse_raw_days(text: str, period_start: date, period_end: date) -> list[RawPunchDay]:
@@ -382,6 +396,7 @@ def calculate_day_metrics(
     raw_day: RawPunchDay | None,
     schedule_map: dict[str, WorkSchedule],
     default_schedule: WorkSchedule,
+    settings: ApuracaoSettings,
 ) -> DayMetrics:
     schedule = resolve_schedule_for_day(raw_day, schedule_map, default_schedule)
     holiday_name = get_brazil_holiday_name(work_date)
@@ -417,6 +432,12 @@ def calculate_day_metrics(
     status_code = raw_day.status_code
     ignored_reason = detect_ignored_reason(raw_day)
     non_business_day = non_working_weekday or holiday_name or status_code in {"FE", "RE"}
+    paid_non_business_day = should_pay_non_business_day(
+        work_date=work_date,
+        status_code=status_code,
+        holiday_name=holiday_name,
+        settings=settings,
+    )
     if ignored_reason:
         return build_ignored_day(work_date, status_code, holiday_name, raw_day, ignored_reason, schedule)
     if (non_business_day or status_code == "CO") and not raw_day.entries:
@@ -482,17 +503,19 @@ def calculate_day_metrics(
 
     worked_minutes = calculate_paired_worked_minutes(punch_datetimes)
     if non_business_day or status_code == "CO":
-        return build_non_business_workday(
-            work_date=work_date,
-            journey_code=raw_day.journey_code,
-            status_code=status_code,
-            holiday_name=holiday_name,
-            first_entry=first_entry,
-            last_exit=last_exit,
-            worked_minutes=worked_minutes,
-            punch_datetimes=punch_datetimes,
-            schedule=schedule,
-        )
+        if paid_non_business_day:
+            return build_non_business_workday(
+                work_date=work_date,
+                journey_code=raw_day.journey_code,
+                status_code=status_code,
+                holiday_name=holiday_name,
+                first_entry=first_entry,
+                last_exit=last_exit,
+                worked_minutes=worked_minutes,
+                punch_datetimes=punch_datetimes,
+                schedule=schedule,
+            )
+        return build_ignored_day(work_date, status_code, holiday_name, raw_day, schedule=schedule)
 
     standard_start_dt = datetime.combine(work_date, schedule.start)
     standard_end_dt = datetime.combine(work_date, schedule.end)
@@ -532,6 +555,19 @@ def calculate_day_metrics(
         ignored_reason=None,
         issues=issues,
     )
+
+
+def should_pay_non_business_day(
+    work_date: date,
+    status_code: str,
+    holiday_name: str | None,
+    settings: ApuracaoSettings,
+) -> bool:
+    if holiday_name and settings.payable_holidays:
+        return True
+    if work_date.weekday() >= 5 and settings.payable_weekends:
+        return True
+    return status_code in settings.payable_status_codes
 
 
 def build_ignored_day(
