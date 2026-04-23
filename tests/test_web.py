@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -116,46 +117,86 @@ class WebAppTests(unittest.TestCase):
 
     def test_recent_reports_endpoint_returns_latest_items(self):
         client = TestClient(app)
-        REPORTS["first"] = {
-            "filename": "a.pdf",
-            "pdf": b"%PDF-1.4\n",
-            "recent": {
-                "reportId": "first",
+        with TemporaryDirectory() as temp_dir, patch("conferir_ponto.web.REPORTS_DIR", Path(temp_dir)):
+            REPORTS["first"] = {
                 "filename": "a.pdf",
-                "employeeName": "Primeiro",
-                "periodStart": "2026-04-01",
-                "periodEnd": "2026-04-30",
-                "processedAt": "2026-04-22T10:00:00",
-                "createdAt": "2026-04-22T10:00:00",
-                "processingDurationMs": 120,
-                "summary": {"businessDaysProcessed": 20, "inconsistencyCount": 1, "balance": "00:10", "paidOvertime": "00:00"},
-                "diagnostics": {"ignoredDays": 2},
-            },
-        }
-        REPORTS["second"] = {
-            "filename": "b.pdf",
-            "pdf": b"%PDF-1.4\n",
-            "recent": {
-                "reportId": "second",
+                "pdf": b"%PDF-1.4\n",
+                "recent": {
+                    "reportId": "first",
+                    "filename": "a.pdf",
+                    "employeeName": "Primeiro",
+                    "periodStart": "2026-04-01",
+                    "periodEnd": "2026-04-30",
+                    "processedAt": "2026-04-22T10:00:00",
+                    "createdAt": "2026-04-22T10:00:00",
+                    "processingDurationMs": 120,
+                    "summary": {"businessDaysProcessed": 20, "inconsistencyCount": 1, "balance": "00:10", "paidOvertime": "00:00"},
+                    "diagnostics": {"ignoredDays": 2},
+                },
+            }
+            REPORTS["second"] = {
                 "filename": "b.pdf",
-                "employeeName": "Segundo",
-                "periodStart": "2026-05-01",
-                "periodEnd": "2026-05-31",
-                "processedAt": "2026-05-22T10:00:00",
-                "createdAt": "2026-05-22T10:00:00",
-                "processingDurationMs": 95,
-                "summary": {"businessDaysProcessed": 21, "inconsistencyCount": 0, "balance": "01:00", "paidOvertime": "02:00"},
-                "diagnostics": {"ignoredDays": 0},
-            },
-        }
+                "pdf": b"%PDF-1.4\n",
+                "recent": {
+                    "reportId": "second",
+                    "filename": "b.pdf",
+                    "employeeName": "Segundo",
+                    "periodStart": "2026-05-01",
+                    "periodEnd": "2026-05-31",
+                    "processedAt": "2026-05-22T10:00:00",
+                    "createdAt": "2026-05-22T10:00:00",
+                    "processingDurationMs": 95,
+                    "summary": {"businessDaysProcessed": 21, "inconsistencyCount": 0, "balance": "01:00", "paidOvertime": "02:00"},
+                    "diagnostics": {"ignoredDays": 0},
+                },
+            }
 
-        response = client.get("/api/reports/recent")
+            response = client.get("/api/reports/recent")
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["count"], 2)
         self.assertEqual(payload["items"][0]["reportId"], "second")
         self.assertEqual(payload["items"][1]["reportId"], "first")
+
+    def test_recent_reports_endpoint_reads_persisted_items(self):
+        client = TestClient(app)
+        with TemporaryDirectory() as temp_dir:
+            reports_dir = Path(temp_dir)
+            reports_dir.joinpath("older.json").write_text(
+                '{"reportId":"older","filename":"older.pdf","recent":{"reportId":"older","filename":"older.pdf","employeeName":"Mais antigo","createdAt":"2026-04-22T10:00:00","summary":{"balance":"00:10","inconsistencyCount":1,"paidOvertime":"00:00","businessDaysProcessed":20},"diagnostics":{}}}',
+                encoding="utf-8",
+            )
+            reports_dir.joinpath("newer.json").write_text(
+                '{"reportId":"newer","filename":"newer.pdf","recent":{"reportId":"newer","filename":"newer.pdf","employeeName":"Mais novo","createdAt":"2026-04-23T10:00:00","summary":{"balance":"01:00","inconsistencyCount":0,"paidOvertime":"02:00","businessDaysProcessed":21},"diagnostics":{}}}',
+                encoding="utf-8",
+            )
+            with patch("conferir_ponto.web.REPORTS_DIR", reports_dir):
+                response = client.get("/api/reports/recent")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["items"][0]["reportId"], "newer")
+        self.assertEqual(payload["items"][1]["reportId"], "older")
+
+    def test_export_endpoint_falls_back_to_persisted_report(self):
+        client = TestClient(app)
+        with TemporaryDirectory() as temp_dir:
+            reports_dir = Path(temp_dir)
+            report_id = "persisted-report"
+            reports_dir.joinpath(f"{report_id}.json").write_text(
+                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report","filename":"persisted.pdf","createdAt":"2026-04-23T10:00:00","summary":{"balance":"00:00","inconsistencyCount":0,"paidOvertime":"00:00","businessDaysProcessed":1},"diagnostics":{}}}',
+                encoding="utf-8",
+            )
+            reports_dir.joinpath(f"{report_id}.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
+
+            with patch("conferir_ponto.web.REPORTS_DIR", reports_dir):
+                response = client.get(f"/api/export/{report_id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/pdf")
+        self.assertIn("persisted_apuracao.pdf", response.headers["content-disposition"])
+        self.assertTrue(response.content.startswith(b"%PDF"))
 
     def test_report_cache_discards_oldest_entry_when_limit_is_reached(self):
         client = TestClient(app)
@@ -189,6 +230,34 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(REPORTS), 32)
         self.assertNotIn("existing-0", REPORTS)
+
+    def test_process_endpoint_persists_report_files(self):
+        client = TestClient(app)
+        fake_payload = {
+            "employeeName": "Teste",
+            "periodStart": "2026-04-01",
+            "periodEnd": "2026-04-30",
+            "processedAt": "2026-04-11T10:00:00",
+            "meta": {"calendarDays": 30, "includedDays": 1},
+            "schedule": {"start": "07:45", "lunchStart": "12:00", "lunchEnd": "13:00", "end": "17:00", "workingWeekdays": [0, 1, 2, 3, 4], "source": None},
+            "summary": {"businessDaysProcessed": 1, "ignoredDays": 0, "inconsistencyCount": 0, "worked": "08:00", "expected": "08:00", "balance": "00:00", "positiveBank": "00:00", "negativeBank": "00:00", "compensated": "00:00", "paidOvertime": "00:00", "overtimeBeforeLunch": "00:00", "overtimeAfterLunch": "00:00", "late": "00:00", "earlyLeave": "00:00"},
+            "diagnostics": {"calendarDays": 30, "includedDays": 1, "ignoredDays": 0, "daysWithIssues": 0, "paidOvertimeDays": 0, "lateDays": 0, "earlyLeaveDays": 0, "weekendWorkedDays": 0, "holidayWorkedDays": 0, "missingPunchDays": 0, "ignoredBreakdown": []},
+            "days": [],
+        }
+        with TemporaryDirectory() as temp_dir, patch("conferir_ponto.web.REPORTS_DIR", Path(temp_dir)), patch(
+            "conferir_ponto.web.parse_timecard_bytes", return_value=object()
+        ), patch("conferir_ponto.web.build_summary_payload", return_value=fake_payload), patch(
+            "conferir_ponto.web.export_analysis_to_pdf", return_value=b"%PDF-1.4\npersisted\n"
+        ):
+            response = client.post(
+                "/api/process",
+                files={"file": ("persistir.pdf", b"%PDF-1.4\nfake\n", "application/pdf")},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            report_id = response.json()["reportId"]
+            self.assertTrue(Path(temp_dir, f"{report_id}.json").exists())
+            self.assertTrue(Path(temp_dir, f"{report_id}.pdf").exists())
 
 
 class WebHelpersTests(unittest.TestCase):

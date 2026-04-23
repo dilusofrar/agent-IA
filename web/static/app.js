@@ -486,7 +486,17 @@
       }),
     );
 
-    wrap.append(head, meta, metrics);
+    const actions = createElement("div", { className: "recent-item-actions" });
+    const exportButton = createElement("a", {
+      className: "btn btn-secondary",
+      text: "Exportar PDF",
+      attrs: {
+        href: "/api/export/" + encodeURIComponent(item.reportId || ""),
+      },
+    });
+    actions.appendChild(exportButton);
+
+    wrap.append(head, meta, metrics, actions);
     return wrap;
   }
 

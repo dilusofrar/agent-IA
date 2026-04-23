@@ -642,6 +642,11 @@ p { margin: 0; }
   font-size: 12px;
 }
 
+.recent-item-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .recent-metric {
   display: inline-flex;
   align-items: center;
@@ -980,6 +985,7 @@ p { margin: 0; }
   .panel-table .panel-head { position: static; }
   .recent-item { padding: 16px 18px; }
   .search-field { min-width: 100%; }
+  .recent-item-actions .btn { width: 100%; }
 }
 
 @media (max-width: 420px) {

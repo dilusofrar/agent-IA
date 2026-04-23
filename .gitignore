@@ -7,3 +7,4 @@ __pycache__/
 data/outputs/*.csv
 data/outputs/*.xlsm
 data/uploads/
+data/reports/
