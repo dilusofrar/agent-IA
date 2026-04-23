@@ -205,6 +205,22 @@ TB
         self.assertEqual(sunday.status_label, "Horas Pagas")
         self.assertTrue(sunday.ignored)
 
+    def test_saturday_without_entries_keeps_0996_and_paid_status(self):
+        text = """
+Início Ponto: 28/03/2026
+Fim Ponto: 28/03/2026
+Matrícula: 1 - 1 TESTE USUARIO
+28 Sab
+CO
+"""
+        analysis = parse_timecard_text(text)
+        saturday = analysis.days[0]
+
+        self.assertEqual(saturday.journey_code, "0996")
+        self.assertEqual(saturday.applied_schedule_label, "00:00-00:00 / 00:00-00:00")
+        self.assertEqual(saturday.status_label, "Horas Pagas")
+        self.assertTrue(saturday.ignored)
+
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"
         if not pdf_path.exists():

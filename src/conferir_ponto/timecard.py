@@ -524,7 +524,15 @@ def calculate_day_metrics(
     if ignored_reason:
         return build_ignored_day(work_date, status_code, holiday_name, raw_day, ignored_reason, schedule)
     if (non_business_day or status_code == "CO") and not raw_day.entries:
-        return build_ignored_day(work_date, status_code, holiday_name, raw_day, schedule=schedule)
+        fallback_status_code = "HP" if paid_non_business_day else status_code
+        return build_ignored_day(
+            work_date,
+            fallback_status_code,
+            holiday_name,
+            raw_day,
+            schedule=schedule,
+            journey_code=resolved_journey_code,
+        )
 
     if len(raw_day.entries) < 2:
         return DayMetrics(
