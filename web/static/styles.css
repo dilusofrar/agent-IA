@@ -669,6 +669,7 @@ p { margin: 0; }
   border-spacing: 0;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
+  table-layout: fixed;
 }
 
 .data-table th,
@@ -697,41 +698,25 @@ p { margin: 0; }
 
 .data-table tbody tr:last-child td { border-bottom: 0; }
 
-.data-table th:nth-child(1),
-.data-table td:nth-child(1) { min-width: 132px; }
+.data-table .col-date { width: 132px; }
+.data-table .col-jrnd { width: 84px; }
+.data-table .col-journey { width: 220px; }
+.data-table .col-status { width: 138px; }
+.data-table .col-entry,
+.data-table .col-exit { width: 96px; }
+.data-table .col-worked,
+.data-table .col-balance,
+.data-table .col-extra-before,
+.data-table .col-extra-after,
+.data-table .col-extra-paid,
+.data-table .col-late { width: 112px; }
+.data-table .col-early { width: 160px; }
+.data-table .col-alerts { width: 360px; }
 
-.data-table th:nth-child(2),
-.data-table td:nth-child(2) { min-width: 84px; }
-
-.data-table th:nth-child(3),
-.data-table td:nth-child(3) { min-width: 220px; }
-
-.data-table th:nth-child(4),
-.data-table td:nth-child(4) { min-width: 138px; }
-
-.data-table th:nth-child(5),
-.data-table td:nth-child(5),
-.data-table th:nth-child(6),
-.data-table td:nth-child(6) { min-width: 96px; }
-
-.data-table th:nth-child(7),
-.data-table td:nth-child(7),
-.data-table th:nth-child(8),
-.data-table td:nth-child(8),
-.data-table th:nth-child(9),
-.data-table td:nth-child(9),
-.data-table th:nth-child(10),
-.data-table td:nth-child(10),
-.data-table th:nth-child(11),
-.data-table td:nth-child(11),
-.data-table th:nth-child(12),
-.data-table td:nth-child(12) { min-width: 112px; }
-
-.data-table th:nth-child(13),
-.data-table td:nth-child(13) { min-width: 160px; }
-
-.data-table th:nth-child(14),
-.data-table td:nth-child(14) { min-width: 360px; }
+.data-table th,
+.data-table td {
+  overflow-wrap: anywhere;
+}
 
 .day-date {
   display: block;
