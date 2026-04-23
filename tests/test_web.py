@@ -141,7 +141,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.4.0")
+        self.assertEqual(response.json()["version"], "1.5.0")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
 
@@ -150,7 +150,7 @@ class WebAppTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             settings_path = Path(temp_dir) / "apuracao.json"
             settings_path.write_text(
-                '{"defaultSchedule":{"start":"08:00","lunchStart":"12:00","lunchEnd":"13:00","end":"17:30"},"workingWeekdays":[0,1,2,3,4],"paidHours":{"weekends":true,"holidays":true,"statusCodes":["CO","FE","RE"]},"journeyRules":{"0004":{"countOvertimeBeforeStart":false,"lateToleranceMinutes":7}}}',
+                '{"defaultSchedule":{"start":"08:00","lunchStart":"12:00","lunchEnd":"13:00","end":"17:30"},"workingWeekdays":[0,1,2,3,4],"paidHours":{"weekends":true,"holidays":true,"statusCodes":["CO","FE","RE"]},"journeySchedules":{"0004":{"start":"08:00","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"},"0048":{"start":"07:45","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"},"0999":{"start":"08:00","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"}},"journeyRules":{"0004":{"countOvertimeBeforeStart":false,"lateToleranceMinutes":7}}}',
                 encoding="utf-8",
             )
 
@@ -161,6 +161,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["defaultSchedule"]["start"], "08:00")
+        self.assertEqual(payload["journeySchedules"]["0048"]["start"], "07:45")
         self.assertEqual(payload["journeyRules"]["0004"]["lateToleranceMinutes"], 7)
 
     def test_put_settings_persists_configuration(self):
@@ -185,6 +186,26 @@ class WebAppTests(unittest.TestCase):
                             "holidays": True,
                             "statusCodes": ["CO", "FE", "RE"],
                         },
+                        "journeySchedules": {
+                            "0004": {
+                                "start": "08:00",
+                                "lunchStart": "12:00",
+                                "lunchEnd": "13:00",
+                                "end": "17:00",
+                            },
+                            "0048": {
+                                "start": "07:45",
+                                "lunchStart": "12:00",
+                                "lunchEnd": "13:00",
+                                "end": "17:00",
+                            },
+                            "0999": {
+                                "start": "08:00",
+                                "lunchStart": "12:00",
+                                "lunchEnd": "13:00",
+                                "end": "17:00",
+                            },
+                        },
                         "journeyRules": {
                             "0004": {
                                 "countOvertimeBeforeStart": False,
@@ -200,6 +221,7 @@ class WebAppTests(unittest.TestCase):
                 history = history_path.read_text(encoding="utf-8")
 
         self.assertIn('"start": "08:00"', persisted)
+        self.assertIn('"0048"', persisted)
         self.assertIn('"lateToleranceMinutes": 9', persisted)
         self.assertIn('"actor": "admin"', history)
         self.assertIn("Jornada padrão", history)
@@ -210,7 +232,7 @@ class WebAppTests(unittest.TestCase):
             settings_path = Path(temp_dir) / "apuracao.json"
             history_path = Path(temp_dir) / "apuracao-history.jsonl"
             settings_path.write_text(
-                '{"defaultSchedule":{"start":"07:45","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"},"workingWeekdays":[0,1,2,3,4],"paidHours":{"weekends":true,"holidays":true,"statusCodes":["CO","FE","RE"]},"journeyRules":{"0004":{"countOvertimeBeforeStart":false,"lateToleranceMinutes":5}}}',
+                '{"defaultSchedule":{"start":"07:45","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"},"workingWeekdays":[0,1,2,3,4],"paidHours":{"weekends":true,"holidays":true,"statusCodes":["CO","FE","RE"]},"journeySchedules":{"0004":{"start":"08:00","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"},"0048":{"start":"07:45","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"},"0999":{"start":"08:00","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"}},"journeyRules":{"0004":{"countOvertimeBeforeStart":false,"lateToleranceMinutes":5}}}',
                 encoding="utf-8",
             )
 
@@ -230,6 +252,26 @@ class WebAppTests(unittest.TestCase):
                             "weekends": True,
                             "holidays": True,
                             "statusCodes": ["CO", "FE", "RE"],
+                        },
+                        "journeySchedules": {
+                            "0004": {
+                                "start": "08:00",
+                                "lunchStart": "12:00",
+                                "lunchEnd": "13:00",
+                                "end": "17:00",
+                            },
+                            "0048": {
+                                "start": "07:45",
+                                "lunchStart": "12:00",
+                                "lunchEnd": "13:00",
+                                "end": "17:00",
+                            },
+                            "0999": {
+                                "start": "08:00",
+                                "lunchStart": "12:00",
+                                "lunchEnd": "13:00",
+                                "end": "17:00",
+                            },
                         },
                         "journeyRules": {
                             "0004": {

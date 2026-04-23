@@ -449,16 +449,13 @@
 
   function renderSettingsSummary(settings) {
     if (ruleSchedule && settings && settings.defaultSchedule) {
-      const schedule = settings.defaultSchedule;
+      const normal = settings.journeySchedules && settings.journeySchedules["0004"];
+      const compensation = settings.journeySchedules && settings.journeySchedules["0048"];
       ruleSchedule.textContent =
-        "Jornada padrão " +
-        schedule.start +
-        "-" +
-        schedule.lunchStart +
-        " / " +
-        schedule.lunchEnd +
-        "-" +
-        schedule.end;
+        "JRND 0004 normal " +
+        formatShortSchedule(normal || settings.defaultSchedule) +
+        " · JRND 0048 compensação " +
+        formatShortSchedule(compensation || settings.defaultSchedule);
     }
 
     if (rulePaidHours && settings && settings.paidHours) {
@@ -471,8 +468,15 @@
       }
       rulePaidHours.textContent =
         (parts.length ? capitalize(parts.join(", ")) : "Dias não úteis") +
-        " com batida = hora paga";
+        " com batida = hora paga · domingo JRND 0999";
     }
+  }
+
+  function formatShortSchedule(schedule) {
+    if (!schedule) {
+      return "—";
+    }
+    return schedule.start + "-" + schedule.end;
   }
 
   function renderMetric(metric) {

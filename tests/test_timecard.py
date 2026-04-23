@@ -144,6 +144,31 @@ RE
         self.assertFalse(sunday.included_in_totals)
         self.assertEqual(format_minutes(sunday.payable_overtime_minutes), "00:00")
 
+    def test_known_journey_code_uses_persisted_schedule_when_pdf_has_no_definition(self):
+        text = """
+Início Ponto: 01/03/2026
+Fim Ponto: 02/03/2026
+Matrícula: 1 - 1 TESTE USUARIO
+01 Dom
+0999
+RE
+08:00 o 12:00 i 13:00 o 17:00 i
+02 Seg
+0048
+TB
+07:52 o 12:00 i 13:00 o 17:00 i
+"""
+        analysis = parse_timecard_text(text)
+
+        sunday = next(day for day in analysis.days if day.work_date.isoformat() == "2026-03-01")
+        monday = next(day for day in analysis.days if day.work_date.isoformat() == "2026-03-02")
+
+        self.assertEqual(sunday.journey_code, "0999")
+        self.assertEqual(sunday.applied_schedule_label, "08:00-12:00 / 13:00-17:00")
+        self.assertEqual(monday.journey_code, "0048")
+        self.assertEqual(monday.applied_schedule_label, "07:45-12:00 / 13:00-17:00")
+        self.assertEqual(format_minutes(monday.late_minutes), "00:07")
+
     def test_compensation_day_with_punches_is_counted(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "nov2025.pdf"
         if not pdf_path.exists():

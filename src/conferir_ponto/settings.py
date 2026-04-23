@@ -21,6 +21,14 @@ class JourneyRuleSettings:
 
 
 @dataclass(frozen=True)
+class JourneyScheduleSettings:
+    start: str
+    lunch_start: str
+    lunch_end: str
+    end: str
+
+
+@dataclass(frozen=True)
 class ApuracaoSettings:
     default_schedule_start: str = "07:45"
     default_schedule_lunch_start: str = "12:00"
@@ -30,6 +38,13 @@ class ApuracaoSettings:
     payable_weekends: bool = True
     payable_holidays: bool = True
     payable_status_codes: tuple[str, ...] = ("CO", "FE", "RE")
+    journey_schedules: dict[str, JourneyScheduleSettings] = field(
+        default_factory=lambda: {
+            "0004": JourneyScheduleSettings("08:00", "12:00", "13:00", "17:00"),
+            "0048": JourneyScheduleSettings("07:45", "12:00", "13:00", "17:00"),
+            "0999": JourneyScheduleSettings("08:00", "12:00", "13:00", "17:00"),
+        }
+    )
     journey_rules: dict[str, JourneyRuleSettings] = field(
         default_factory=lambda: {
             "0004": JourneyRuleSettings(
@@ -58,6 +73,26 @@ def default_settings_payload() -> dict[str, Any]:
             "weekends": True,
             "holidays": True,
             "statusCodes": ["CO", "FE", "RE"],
+        },
+        "journeySchedules": {
+            "0004": {
+                "start": "08:00",
+                "lunchStart": "12:00",
+                "lunchEnd": "13:00",
+                "end": "17:00",
+            },
+            "0048": {
+                "start": "07:45",
+                "lunchStart": "12:00",
+                "lunchEnd": "13:00",
+                "end": "17:00",
+            },
+            "0999": {
+                "start": "08:00",
+                "lunchStart": "12:00",
+                "lunchEnd": "13:00",
+                "end": "17:00",
+            },
         },
         "journeyRules": {
             "0004": {
@@ -108,6 +143,15 @@ def settings_to_payload(settings: ApuracaoSettings) -> dict[str, Any]:
             "holidays": settings.payable_holidays,
             "statusCodes": list(settings.payable_status_codes),
         },
+        "journeySchedules": {
+            code: {
+                "start": schedule.start,
+                "lunchStart": schedule.lunch_start,
+                "lunchEnd": schedule.lunch_end,
+                "end": schedule.end,
+            }
+            for code, schedule in sorted((settings.journey_schedules or {}).items())
+        },
         "journeyRules": {
             code: {
                 "countOvertimeBeforeStart": rule.count_overtime_before_start,
@@ -123,6 +167,7 @@ def parse_settings_payload(raw_payload: dict[str, Any] | None) -> ApuracaoSettin
     default_payload = default_settings_payload()
     default_schedule = payload.get("defaultSchedule", {})
     paid_hours = payload.get("paidHours", {})
+    journey_schedules_payload = payload.get("journeySchedules", {})
     journey_rules_payload = payload.get("journeyRules", {})
 
     working_weekdays = tuple(
@@ -145,6 +190,27 @@ def parse_settings_payload(raw_payload: dict[str, Any] | None) -> ApuracaoSettin
         )
     ) or tuple(default_payload["paidHours"]["statusCodes"])
 
+    journey_schedules = {
+        normalize_journey_code(code): JourneyScheduleSettings(
+            start=str(schedule_payload.get("start", default_payload["journeySchedules"]["0004"]["start"])),
+            lunch_start=str(schedule_payload.get("lunchStart", default_payload["journeySchedules"]["0004"]["lunchStart"])),
+            lunch_end=str(schedule_payload.get("lunchEnd", default_payload["journeySchedules"]["0004"]["lunchEnd"])),
+            end=str(schedule_payload.get("end", default_payload["journeySchedules"]["0004"]["end"])),
+        )
+        for code, schedule_payload in journey_schedules_payload.items()
+        if str(code).strip()
+    }
+
+    for code, schedule_payload in default_payload["journeySchedules"].items():
+        normalized_code = normalize_journey_code(code)
+        if normalized_code not in journey_schedules:
+            journey_schedules[normalized_code] = JourneyScheduleSettings(
+                start=str(schedule_payload["start"]),
+                lunch_start=str(schedule_payload["lunchStart"]),
+                lunch_end=str(schedule_payload["lunchEnd"]),
+                end=str(schedule_payload["end"]),
+            )
+
     journey_rules = {
         normalize_journey_code(code): JourneyRuleSettings(
             count_overtime_before_start=bool(rule_payload.get("countOvertimeBeforeStart", True)),
@@ -166,6 +232,7 @@ def parse_settings_payload(raw_payload: dict[str, Any] | None) -> ApuracaoSettin
         payable_weekends=bool(paid_hours.get("weekends", default_payload["paidHours"]["weekends"])),
         payable_holidays=bool(paid_hours.get("holidays", default_payload["paidHours"]["holidays"])),
         payable_status_codes=payable_status_codes,
+        journey_schedules=journey_schedules,
         journey_rules=journey_rules,
     )
 
@@ -300,3 +367,10 @@ def describe_weekdays(values: list[int] | tuple[int, ...] | None) -> str:
     weekday_names = ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")
     selected = [weekday_names[int(value)] for value in values or [] if int(value) in range(0, 7)]
     return ", ".join(selected) if selected else "nenhum"
+    before_schedules = before.get("journeySchedules", {}) or {}
+    after_schedules = after.get("journeySchedules", {}) or {}
+    for code in ("0004", "0048", "0999"):
+        before_label = describe_schedule(before_schedules.get(code))
+        after_label = describe_schedule(after_schedules.get(code))
+        if before_label != after_label:
+            changes.append(f"JRND {code}: {before_label} -> {after_label}")

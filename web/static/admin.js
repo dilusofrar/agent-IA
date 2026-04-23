@@ -109,6 +109,9 @@
     document.getElementById("schedule-lunch-start").value = settings.defaultSchedule.lunchStart;
     document.getElementById("schedule-lunch-end").value = settings.defaultSchedule.lunchEnd;
     document.getElementById("schedule-end").value = settings.defaultSchedule.end;
+    populateJourneySchedule("0004", settings);
+    populateJourneySchedule("0048", settings);
+    populateJourneySchedule("0999", settings);
     document.getElementById("paid-weekends").checked = Boolean(settings.paidHours.weekends);
     document.getElementById("paid-holidays").checked = Boolean(settings.paidHours.holidays);
     document.getElementById("paid-status-codes").value = (settings.paidHours.statusCodes || []).join(", ");
@@ -153,6 +156,11 @@
           .map(function (item) { return item.trim().toUpperCase(); })
           .filter(Boolean),
       },
+      journeySchedules: {
+        "0004": collectJourneySchedule("0004"),
+        "0048": collectJourneySchedule("0048"),
+        "0999": collectJourneySchedule("0999"),
+      },
       journeyRules: {
         "0004": {
           countOvertimeBeforeStart: document.getElementById("journey-0004-extra-before").checked,
@@ -169,11 +177,14 @@
 
     const cards = [
       summaryCard("Jornada padrão", settings.defaultSchedule.start + "-" + settings.defaultSchedule.lunchStart + " / " + settings.defaultSchedule.lunchEnd + "-" + settings.defaultSchedule.end, "Base usada quando o PDF não informar outra jornada."),
+      summaryCard("JRND 0004", formatSchedule(settings.journeySchedules["0004"]), "Jornada normal padrão."),
+      summaryCard("JRND 0048", formatSchedule(settings.journeySchedules["0048"]), "Jornada de compensação."),
+      summaryCard("JRND 0999", formatSchedule(settings.journeySchedules["0999"]), "Jornada usada para domingo."),
       summaryCard("Dias úteis", (settings.workingWeekdays || []).map(weekdayLabel).join(", "), "Dias considerados úteis para cálculo normal."),
       summaryCard("Fim de semana", settings.paidHours.weekends ? "Pago" : "Ignorado", "Sábado e domingo com batida."),
       summaryCard("Feriado", settings.paidHours.holidays ? "Pago" : "Ignorado", "Feriado com batida."),
       summaryCard("Status pagos", (settings.paidHours.statusCodes || []).join(", ") || "Nenhum", "Status que geram hora paga fora da rotina."),
-      summaryCard("JRND 0004", (settings.journeyRules["0004"].lateToleranceMinutes || 0) + " min de tolerância", settings.journeyRules["0004"].countOvertimeBeforeStart ? "Conta extra antes do início." : "Não conta extra antes do início."),
+      summaryCard("Regra 0004", (settings.journeyRules["0004"].lateToleranceMinutes || 0) + " min de tolerância", settings.journeyRules["0004"].countOvertimeBeforeStart ? "Conta extra antes do início." : "Não conta extra antes do início."),
     ];
     summaryGrid.replaceChildren.apply(summaryGrid, cards);
     jsonPreview.textContent = JSON.stringify(settings, null, 2);
@@ -237,6 +248,33 @@
       createElement("span", { className: "insight-note", text: note }),
     );
     return card;
+  }
+
+  function populateJourneySchedule(code, settings) {
+    const schedule = settings.journeySchedules && settings.journeySchedules[code] ? settings.journeySchedules[code] : null;
+    if (!schedule) {
+      return;
+    }
+    document.getElementById("journey-" + code + "-start").value = schedule.start;
+    document.getElementById("journey-" + code + "-lunch-start").value = schedule.lunchStart;
+    document.getElementById("journey-" + code + "-lunch-end").value = schedule.lunchEnd;
+    document.getElementById("journey-" + code + "-end").value = schedule.end;
+  }
+
+  function collectJourneySchedule(code) {
+    return {
+      start: document.getElementById("journey-" + code + "-start").value,
+      lunchStart: document.getElementById("journey-" + code + "-lunch-start").value,
+      lunchEnd: document.getElementById("journey-" + code + "-lunch-end").value,
+      end: document.getElementById("journey-" + code + "-end").value,
+    };
+  }
+
+  function formatSchedule(schedule) {
+    if (!schedule) {
+      return "—";
+    }
+    return schedule.start + "-" + schedule.lunchStart + " / " + schedule.lunchEnd + "-" + schedule.end;
   }
 
   function createHistoryChanges(changes) {

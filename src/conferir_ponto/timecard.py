@@ -15,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from conferir_ponto.settings import ApuracaoSettings
+from conferir_ponto.settings import ApuracaoSettings, JourneyScheduleSettings
 
 
 PERIOD_PATTERN = re.compile(
@@ -162,8 +162,9 @@ def parse_timecard_text(text: str, settings: ApuracaoSettings | None = None) -> 
     effective_settings = settings or ApuracaoSettings()
     period_start, period_end = extract_period_dates(text)
     employee_name = extract_employee_name(text)
-    schedule_map, schedule = extract_work_schedules(text, effective_settings)
+    schedule_map, fallback_schedule = extract_work_schedules(text, effective_settings)
     raw_days = parse_raw_days(text, period_start, period_end)
+    schedule = choose_reference_schedule(schedule_map, fallback_schedule, raw_days)
     day_map = {raw.work_date: raw for raw in raw_days}
 
     return TimeCardAnalysis(
@@ -209,7 +210,10 @@ def extract_work_schedules(
     working_weekdays = extract_working_weekdays(text, settings)
     source_match = TURN_PATTERN.search(text)
     source = source_match.group("line") if source_match else None
-    schedule_map: dict[str, WorkSchedule] = {}
+    schedule_map: dict[str, WorkSchedule] = {
+        code: build_schedule_from_settings(schedule_settings, settings, code, working_weekdays, source)
+        for code, schedule_settings in (settings.journey_schedules or {}).items()
+    }
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -217,16 +221,17 @@ def extract_work_schedules(
         if not match:
             continue
         normalized_code = normalize_journey_code(match.group("code"))
-        journey_rule = settings.rule_for(normalized_code)
-        schedule_map[normalized_code] = WorkSchedule(
-            start=parse_clock(match.group("start")),
-            lunch_start=parse_clock(match.group("lunch_start")),
-            lunch_end=parse_clock(match.group("lunch_end")),
-            end=parse_clock(match.group("end")),
-            working_weekdays=working_weekdays,
-            count_overtime_before_start=journey_rule.count_overtime_before_start,
-            late_tolerance_minutes=journey_rule.late_tolerance_minutes,
-            source=source,
+        schedule_map[normalized_code] = build_schedule_from_settings(
+            JourneyScheduleSettings(
+                start=match.group("start"),
+                lunch_start=match.group("lunch_start"),
+                lunch_end=match.group("lunch_end"),
+                end=match.group("end"),
+            ),
+            settings,
+            normalized_code,
+            working_weekdays,
+            source,
         )
 
     default_schedule = (
@@ -245,6 +250,54 @@ def extract_work_schedules(
         )
     )
     return schedule_map, default_schedule
+
+
+def choose_reference_schedule(
+    schedule_map: dict[str, WorkSchedule],
+    fallback_schedule: WorkSchedule,
+    raw_days: list[RawPunchDay],
+) -> WorkSchedule:
+    counts: dict[str, int] = {}
+    for raw_day in raw_days:
+        if not raw_day.journey_code:
+            continue
+        normalized_code = normalize_journey_code(raw_day.journey_code)
+        if normalized_code not in schedule_map:
+            continue
+        counts[normalized_code] = counts.get(normalized_code, 0) + 1
+
+    if not counts:
+        return fallback_schedule
+
+    for preferred_code in ("0048", "0004", "0999"):
+        if preferred_code in counts:
+            return schedule_map.get(preferred_code, fallback_schedule)
+
+    preferred_code = sorted(
+        counts.items(),
+        key=lambda item: (-item[1], item[0]),
+    )[0][0]
+    return schedule_map.get(preferred_code, fallback_schedule)
+
+
+def build_schedule_from_settings(
+    schedule_settings: JourneyScheduleSettings,
+    settings: ApuracaoSettings,
+    journey_code: str | None,
+    working_weekdays: frozenset[int],
+    source: str | None,
+) -> WorkSchedule:
+    journey_rule = settings.rule_for(journey_code)
+    return WorkSchedule(
+        start=parse_clock(schedule_settings.start),
+        lunch_start=parse_clock(schedule_settings.lunch_start),
+        lunch_end=parse_clock(schedule_settings.lunch_end),
+        end=parse_clock(schedule_settings.end),
+        working_weekdays=working_weekdays,
+        count_overtime_before_start=journey_rule.count_overtime_before_start,
+        late_tolerance_minutes=journey_rule.late_tolerance_minutes,
+        source=source,
+    )
 
 
 def extract_working_weekdays(text: str, settings: ApuracaoSettings) -> frozenset[int]:

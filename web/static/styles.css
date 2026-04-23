@@ -980,6 +980,27 @@ p { margin: 0; }
   gap: 18px;
 }
 
+.admin-journey-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-journey-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, .98), rgba(238, 240, 255, .45));
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.admin-journey-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .admin-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
