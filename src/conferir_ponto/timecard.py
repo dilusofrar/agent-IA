@@ -48,6 +48,7 @@ STATUS_LABELS = {
     "RE": "Repouso",
     "NA": "Nao identificado",
 }
+PAID_NON_BUSINESS_STATUS_LABEL = "Extras Pagas"
 
 
 @dataclass(frozen=True)
@@ -409,14 +410,28 @@ def detect_ignored_reason(raw_day: RawPunchDay) -> str | None:
     return None
 
 
+def resolve_journey_code_for_day(
+    work_date: date,
+    raw_day: RawPunchDay | None,
+    schedule_map: dict[str, WorkSchedule],
+) -> str | None:
+    if raw_day is not None and raw_day.journey_code is not None:
+        return normalize_journey_code(raw_day.journey_code)
+    if work_date.weekday() == 6 and "0999" in schedule_map:
+        return "0999"
+    return None
+
+
 def resolve_schedule_for_day(
+    work_date: date,
     raw_day: RawPunchDay | None,
     schedule_map: dict[str, WorkSchedule],
     default_schedule: WorkSchedule,
 ) -> WorkSchedule:
-    if raw_day is None or raw_day.journey_code is None:
+    journey_code = resolve_journey_code_for_day(work_date, raw_day, schedule_map)
+    if journey_code is None:
         return default_schedule
-    return schedule_map.get(normalize_journey_code(raw_day.journey_code), default_schedule)
+    return schedule_map.get(journey_code, default_schedule)
 
 
 def build_period_day_lookup(start_date: date, end_date: date) -> dict[int, list[date]]:
@@ -451,7 +466,8 @@ def calculate_day_metrics(
     default_schedule: WorkSchedule,
     settings: ApuracaoSettings,
 ) -> DayMetrics:
-    schedule = resolve_schedule_for_day(raw_day, schedule_map, default_schedule)
+    resolved_journey_code = resolve_journey_code_for_day(work_date, raw_day, schedule_map)
+    schedule = resolve_schedule_for_day(work_date, raw_day, schedule_map, default_schedule)
     holiday_name = get_brazil_holiday_name(work_date)
     non_working_weekday = work_date.weekday() not in schedule.working_weekdays
 
@@ -461,7 +477,7 @@ def calculate_day_metrics(
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
-            journey_code=None,
+            journey_code=resolved_journey_code,
             applied_schedule_label=format_schedule_label(schedule),
             status_code="NA",
             status_label=STATUS_LABELS["NA"],
@@ -500,7 +516,7 @@ def calculate_day_metrics(
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
-            journey_code=raw_day.journey_code,
+            journey_code=resolved_journey_code,
             applied_schedule_label=format_schedule_label(schedule),
             status_code=status_code,
             status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
@@ -533,7 +549,7 @@ def calculate_day_metrics(
         return DayMetrics(
             work_date=work_date,
             weekday_label=weekday_pt(work_date),
-            journey_code=raw_day.journey_code,
+            journey_code=resolved_journey_code,
             applied_schedule_label=format_schedule_label(schedule),
             status_code=status_code,
             status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
@@ -559,7 +575,7 @@ def calculate_day_metrics(
         if paid_non_business_day:
             return build_non_business_workday(
                 work_date=work_date,
-                journey_code=raw_day.journey_code,
+                journey_code=resolved_journey_code,
                 status_code=status_code,
                 holiday_name=holiday_name,
                 first_entry=first_entry,
@@ -588,7 +604,7 @@ def calculate_day_metrics(
     return DayMetrics(
         work_date=work_date,
         weekday_label=weekday_pt(work_date),
-        journey_code=raw_day.journey_code,
+        journey_code=resolved_journey_code,
         applied_schedule_label=format_schedule_label(schedule),
         status_code=status_code,
         status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
@@ -676,7 +692,7 @@ def build_non_business_workday(
         journey_code=journey_code,
         applied_schedule_label=format_schedule_label(schedule),
         status_code=status_code,
-        status_label=STATUS_LABELS.get(status_code, STATUS_LABELS["NA"]),
+        status_label=PAID_NON_BUSINESS_STATUS_LABEL,
         first_entry=first_entry,
         last_exit=last_exit,
         worked_minutes=worked_minutes,
