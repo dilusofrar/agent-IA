@@ -253,6 +253,74 @@
         </div>
       </section>
     </section>
+
+    <section class="panel admin-users-panel">
+      <header class="panel-head">
+        <div>
+          <h3>Usuários administrativos e operacionais</h3>
+          <p class="muted">Gerencie quem pode acessar o painel e prepare a base para relatórios por proprietário.</p>
+        </div>
+        <span id="admin-users-count" class="badge badge-muted">0</span>
+      </header>
+      <div class="admin-panel-body admin-users-layout">
+        <section class="admin-users-editor">
+          <div class="panel-head panel-head-inline">
+            <div>
+              <h3 id="admin-user-form-title">Novo usuário</h3>
+              <p class="muted">Crie ou atualize contas persistidas no banco local, já prontas para a futura migração ao D1.</p>
+            </div>
+          </div>
+          <form id="admin-user-form" class="admin-form" novalidate>
+            <input id="admin-user-mode" type="hidden" value="create" />
+            <input id="admin-user-original-username" type="hidden" value="" />
+            <div class="admin-form-grid">
+              <label class="admin-field">
+                <span>Usuário</span>
+                <input id="admin-user-username" type="text" autocomplete="username" required />
+              </label>
+              <label class="admin-field">
+                <span>Perfil</span>
+                <select id="admin-user-role" required>
+                  <option value="user">Usuário</option>
+                  <option value="admin">Administrador</option>
+                </select>
+              </label>
+              <label class="admin-field">
+                <span>Nome de exibição</span>
+                <input id="admin-user-display-name" type="text" />
+              </label>
+              <label class="admin-field">
+                <span>E-mail</span>
+                <input id="admin-user-email" type="email" autocomplete="email" />
+              </label>
+              <label class="admin-field">
+                <span>Senha</span>
+                <input id="admin-user-password" type="password" autocomplete="new-password" />
+              </label>
+              <label class="toggle-row toggle-row-inline admin-user-active-toggle">
+                <input id="admin-user-active" type="checkbox" checked />
+                <span>Usuário ativo</span>
+              </label>
+            </div>
+            <div class="admin-actions admin-actions-split">
+              <button type="submit" class="btn btn-primary">Salvar usuário</button>
+              <button id="admin-user-reset" type="button" class="btn btn-secondary">Limpar formulário</button>
+            </div>
+          </form>
+          <div id="admin-user-status" class="status" role="status" aria-live="polite" hidden></div>
+        </section>
+
+        <section class="admin-users-list-shell">
+          <div class="panel-head panel-head-inline">
+            <div>
+              <h3>Usuários cadastrados</h3>
+              <p class="muted">Clique em editar para revisar perfil, senha, ativação e papel.</p>
+            </div>
+          </div>
+          <div id="admin-users-list" class="admin-users-list"></div>
+        </section>
+      </div>
+    </section>
   </main>
 
   <script src="/static/admin.js" defer></script>

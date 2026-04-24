@@ -1028,7 +1028,21 @@ p { margin: 0; }
   color: var(--text);
 }
 
+.admin-field select {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
 .admin-field input:focus {
+  outline: 2px solid rgba(91, 91, 246, .18);
+  border-color: var(--primary);
+}
+
+.admin-field select:focus {
   outline: 2px solid rgba(91, 91, 246, .18);
   border-color: var(--primary);
 }
@@ -1076,6 +1090,16 @@ p { margin: 0; }
 .admin-actions {
   display: flex;
   justify-content: flex-start;
+}
+
+.admin-actions-split {
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-user-active-toggle {
+  align-self: end;
 }
 
 .admin-history,
@@ -1144,6 +1168,56 @@ p { margin: 0; }
   overflow: auto;
 }
 
+.admin-users-panel {
+  margin-top: 20px;
+}
+
+.admin-users-layout {
+  grid-template-columns: minmax(320px, .95fr) minmax(0, 1.05fr);
+  align-items: start;
+}
+
+.admin-users-editor,
+.admin-users-list-shell {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.admin-users-list {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.admin-user-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.admin-user-meta,
+.admin-user-details,
+.admin-user-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px 12px;
+  flex-wrap: wrap;
+}
+
+.admin-user-details span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.admin-user-actions {
+  justify-content: flex-end;
+}
+
 @media (max-width: 960px) {
   .hero {
     grid-template-columns: 1fr;
@@ -1152,7 +1226,8 @@ p { margin: 0; }
 
   .upload-card { order: -1; }
   .results-overview { grid-template-columns: 1fr; }
-  .admin-grid { grid-template-columns: 1fr; }
+  .admin-grid,
+  .admin-users-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {
@@ -1189,6 +1264,8 @@ p { margin: 0; }
   .issue { padding: 14px 18px; }
   .panel-table .panel-head { position: static; }
   .recent-item { padding: 16px 18px; }
+  .admin-actions-split .btn,
+  .admin-user-actions .btn { width: 100%; }
   .search-field { min-width: 100%; }
   .recent-item-actions .btn { width: 100%; }
 }

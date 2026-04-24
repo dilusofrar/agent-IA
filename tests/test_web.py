@@ -159,6 +159,17 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.json()["user"]["username"], "dbadmin")
         self.assertIn("agent_admin_session", response.headers.get("set-cookie", ""))
 
+    def test_admin_session_status_returns_authenticated_user(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            response = client.get("/api/admin/session")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["authenticated"])
+        self.assertEqual(response.json()["user"]["username"], "admin")
+
     def test_settings_requires_admin_authentication(self):
         client = TestClient(app)
 
@@ -190,13 +201,44 @@ class WebAppTests(unittest.TestCase):
         self.assertGreaterEqual(list_response.json()["count"], 2)
         self.assertIn("operador", [item["username"] for item in list_response.json()["items"]])
 
+    def test_admin_can_update_existing_user(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            client.post(
+                "/api/admin/users",
+                json={
+                    "username": "operador",
+                    "password": "senha123",
+                    "role": "user",
+                    "displayName": "Operador",
+                },
+            )
+            update_response = client.put(
+                "/api/admin/users/operador",
+                json={
+                    "role": "admin",
+                    "displayName": "Operador Líder",
+                    "isActive": False,
+                },
+            )
+            list_response = client.get("/api/admin/users")
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["role"], "admin")
+        self.assertFalse(update_response.json()["isActive"])
+        updated_user = next(item for item in list_response.json()["items"] if item["username"] == "operador")
+        self.assertEqual(updated_user["displayName"], "Operador Líder")
+        self.assertFalse(updated_user["isActive"])
+
     def test_healthcheck_returns_security_headers(self):
         client = TestClient(app)
 
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.9.0")
+        self.assertEqual(response.json()["version"], "1.10.0")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
@@ -518,6 +560,37 @@ class WebAppTests(unittest.TestCase):
             self.assertTrue(Path(temp_dir, "reports", report_id, "source.pdf").exists())
             self.assertIn('"payload"', persisted_metadata.read_text(encoding="utf-8"))
             self.assertIn(response_payload["reportId"], persisted_metadata.read_text(encoding="utf-8"))
+
+    def test_process_endpoint_attributes_report_to_authenticated_admin(self):
+        client = TestClient(app)
+        fake_payload = {
+            "employeeName": "Teste",
+            "periodStart": "2026-04-01",
+            "periodEnd": "2026-04-30",
+            "processedAt": "2026-04-11T10:00:00",
+            "meta": {"calendarDays": 30, "includedDays": 1},
+            "schedule": {"start": "07:45", "lunchStart": "12:00", "lunchEnd": "13:00", "end": "17:00", "workingWeekdays": [0, 1, 2, 3, 4], "source": None},
+            "summary": {"businessDaysProcessed": 1, "ignoredDays": 0, "inconsistencyCount": 0, "worked": "08:00", "expected": "08:00", "balance": "00:00", "positiveBank": "00:00", "negativeBank": "00:00", "compensated": "00:00", "paidOvertime": "00:00", "overtimeBeforeLunch": "00:00", "overtimeAfterLunch": "00:00", "late": "00:00", "earlyLeave": "00:00"},
+            "diagnostics": {"calendarDays": 30, "includedDays": 1, "ignoredDays": 0, "daysWithIssues": 0, "paidOvertimeDays": 0, "lateDays": 0, "earlyLeaveDays": 0, "weekendWorkedDays": 0, "holidayWorkedDays": 0, "missingPunchDays": 0, "ignoredBreakdown": []},
+            "days": [],
+        }
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch(
+            "conferir_ponto.web.parse_timecard_bytes", return_value=object()
+        ), patch("conferir_ponto.web.build_summary_payload", return_value=fake_payload), patch(
+            "conferir_ponto.web.export_analysis_to_pdf", return_value=b"%PDF-1.4\nowner\n"
+        ):
+            self.login_admin(client)
+            response = client.post(
+                "/api/process",
+                files={"file": ("owner.pdf", b"%PDF-1.4\nfake\n", "application/pdf")},
+            )
+            recent_response = client.get("/api/reports/recent")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["meta"]["owner"]["username"], "admin")
+        self.assertEqual(recent_response.status_code, 200)
+        self.assertEqual(recent_response.json()["items"][0]["ownerUsername"], "admin")
 
 
 class WebHelpersTests(unittest.TestCase):

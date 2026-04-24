@@ -13,7 +13,7 @@ metadata and settings persistence for a future move to Cloudflare D1 + R2.
 
 The local SQLite database uses the same logical schema planned for D1:
 
-- `reports`: report metadata, payload snapshots, file pointers.
+- `reports`: report metadata, payload snapshots, file pointers and owner attribution.
 - `settings_current`: current settings payload.
 - `settings_audit`: admin audit trail for settings changes.
 - `users`: future login/role model (`user` / `admin`).
@@ -45,5 +45,5 @@ If any of these are missing, the app falls back to local storage automatically.
 
 1. Replace the local storage adapter with R2 object writes.
 2. Switch recent reports and settings audit reads from local SQLite to D1.
-3. Move admin and user authentication to the `users` table.
-4. Add report ownership so common users only see their own history.
+3. Expand `users` into full login/session ownership in D1.
+4. Filter report history and exports by owner so common users only see their own data.

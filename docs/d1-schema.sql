@@ -2,6 +2,8 @@ CREATE TABLE reports (
     report_id TEXT PRIMARY KEY,
     filename TEXT NOT NULL,
     employee_name TEXT,
+    owner_user_id TEXT,
+    owner_username TEXT,
     period_start TEXT,
     period_end TEXT,
     processed_at TEXT,

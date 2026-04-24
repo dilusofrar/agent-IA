@@ -9,6 +9,12 @@
   const summaryGrid = document.getElementById("admin-settings-summary");
   const historyList = document.getElementById("admin-settings-history");
   const jsonPreview = document.getElementById("admin-settings-json");
+  const usersCount = document.getElementById("admin-users-count");
+  const usersList = document.getElementById("admin-users-list");
+  const userForm = document.getElementById("admin-user-form");
+  const userFormTitle = document.getElementById("admin-user-form-title");
+  const userStatus = document.getElementById("admin-user-status");
+  const userResetButton = document.getElementById("admin-user-reset");
 
   if (loginForm) {
     loginForm.addEventListener("submit", handleLoginSubmit);
@@ -17,6 +23,16 @@
   if (settingsForm) {
     loadSettings();
     settingsForm.addEventListener("submit", handleSettingsSubmit);
+  }
+
+  if (userForm) {
+    resetUserForm();
+    loadUsers();
+    userForm.addEventListener("submit", handleUserSubmit);
+  }
+
+  if (userResetButton) {
+    userResetButton.addEventListener("click", resetUserForm);
   }
 
   if (logoutButton) {
@@ -75,6 +91,29 @@
     }
   }
 
+  async function loadUsers() {
+    if (!usersList || !usersCount) {
+      return;
+    }
+    setStatus(userStatus, "loading", "Carregando usuários...");
+    try {
+      const response = await fetch("/api/admin/users", { method: "GET" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Falha ao carregar usuários.");
+      }
+      renderUsers(payload.items || []);
+      setStatus(userStatus, "success", "Usuários carregados.");
+    } catch (error) {
+      if (error.message && /Autenticacao/.test(error.message)) {
+        window.location.href = "/admin/login";
+        return;
+      }
+      renderUsers([]);
+      setStatus(userStatus, "error", error.message || "Falha ao carregar usuários.");
+    }
+  }
+
   async function handleSettingsSubmit(event) {
     event.preventDefault();
     const payload = collectSettingsPayload();
@@ -102,6 +141,56 @@
   async function handleLogout() {
     await fetch("/api/admin/session", { method: "DELETE" });
     window.location.href = "/admin/login";
+  }
+
+  async function handleUserSubmit(event) {
+    event.preventDefault();
+    const mode = document.getElementById("admin-user-mode").value;
+    const username = document.getElementById("admin-user-username").value.trim();
+    const originalUsername = document.getElementById("admin-user-original-username").value.trim();
+    const password = document.getElementById("admin-user-password").value;
+    const payload = {
+      username: username,
+      role: document.getElementById("admin-user-role").value,
+      displayName: document.getElementById("admin-user-display-name").value.trim(),
+      email: document.getElementById("admin-user-email").value.trim(),
+      isActive: document.getElementById("admin-user-active").checked,
+    };
+
+    if (!username) {
+      setStatus(userStatus, "error", "Informe o nome de usuário.");
+      return;
+    }
+    if (mode === "create" && !password) {
+      setStatus(userStatus, "error", "Defina uma senha para criar o usuário.");
+      return;
+    }
+    if (password) {
+      payload.password = password;
+    }
+
+    setStatus(userStatus, "loading", mode === "create" ? "Criando usuário..." : "Atualizando usuário...");
+    try {
+      const response = await fetch(
+        mode === "create"
+          ? "/api/admin/users"
+          : "/api/admin/users/" + encodeURIComponent(originalUsername || username),
+        {
+          method: mode === "create" ? "POST" : "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      const responsePayload = await response.json();
+      if (!response.ok) {
+        throw new Error(responsePayload.detail || "Falha ao salvar usuário.");
+      }
+      resetUserForm();
+      await loadUsers();
+      setStatus(userStatus, "success", mode === "create" ? "Usuário criado com sucesso." : "Usuário atualizado com sucesso.");
+    } catch (error) {
+      setStatus(userStatus, "error", error.message || "Falha ao salvar usuário.");
+    }
   }
 
   function populateForm(settings) {
@@ -242,6 +331,67 @@
     );
   }
 
+  function renderUsers(items) {
+    if (!usersList || !usersCount) {
+      return;
+    }
+
+    usersCount.textContent = String(items.length);
+    usersCount.className = "badge " + (items.length ? "badge-success" : "badge-muted");
+
+    if (!Array.isArray(items) || !items.length) {
+      usersList.replaceChildren(
+        createElement("div", {
+          className: "admin-history-empty",
+          text: "Nenhum usuário persistido ainda.",
+        }),
+      );
+      return;
+    }
+
+    usersList.replaceChildren.apply(
+      usersList,
+      items.map(function (item) {
+        const card = document.createElement("article");
+        card.className = "admin-user-card";
+
+        const meta = createElement("div", { className: "admin-user-meta" });
+        meta.append(
+          createElement("strong", { text: item.displayName || item.username }),
+          createElement("span", {
+            className: "badge " + (item.role === "admin" ? "badge-warning" : "badge-muted"),
+            text: item.role === "admin" ? "Administrador" : "Usuário",
+          }),
+          createElement("span", {
+            className: "badge " + (item.isActive ? "badge-success" : "badge-muted"),
+            text: item.isActive ? "Ativo" : "Inativo",
+          }),
+        );
+
+        const details = createElement("div", { className: "admin-user-details" });
+        details.append(
+          createElement("span", { text: "Login: " + item.username }),
+          createElement("span", { text: "E-mail: " + (item.email || "não informado") }),
+          createElement("span", { text: "Atualizado em " + formatDateTime(item.updatedAt) }),
+        );
+
+        const actions = createElement("div", { className: "admin-user-actions" });
+        const editButton = createElement("button", {
+          className: "btn btn-secondary",
+          text: "Editar",
+          attrs: { type: "button" },
+        });
+        editButton.addEventListener("click", function () {
+          populateUserForm(item);
+        });
+        actions.append(editButton);
+
+        card.append(meta, details, actions);
+        return card;
+      }),
+    );
+  }
+
   function summaryCard(label, value, note) {
     const card = document.createElement("article");
     card.className = "insight-card";
@@ -278,6 +428,39 @@
       return "—";
     }
     return schedule.start + "-" + schedule.lunchStart + " / " + schedule.lunchEnd + "-" + schedule.end;
+  }
+
+  function populateUserForm(user) {
+    document.getElementById("admin-user-mode").value = "update";
+    document.getElementById("admin-user-original-username").value = user.username || "";
+    document.getElementById("admin-user-username").value = user.username || "";
+    document.getElementById("admin-user-username").disabled = true;
+    document.getElementById("admin-user-role").value = user.role || "user";
+    document.getElementById("admin-user-display-name").value = user.displayName || "";
+    document.getElementById("admin-user-email").value = user.email || "";
+    document.getElementById("admin-user-password").value = "";
+    document.getElementById("admin-user-active").checked = Boolean(user.isActive);
+    if (userFormTitle) {
+      userFormTitle.textContent = "Editar usuário";
+    }
+  }
+
+  function resetUserForm() {
+    if (!userForm) {
+      return;
+    }
+    document.getElementById("admin-user-mode").value = "create";
+    document.getElementById("admin-user-original-username").value = "";
+    document.getElementById("admin-user-username").value = "";
+    document.getElementById("admin-user-username").disabled = false;
+    document.getElementById("admin-user-role").value = "user";
+    document.getElementById("admin-user-display-name").value = "";
+    document.getElementById("admin-user-email").value = "";
+    document.getElementById("admin-user-password").value = "";
+    document.getElementById("admin-user-active").checked = true;
+    if (userFormTitle) {
+      userFormTitle.textContent = "Novo usuário";
+    }
   }
 
   function createHistoryChanges(changes) {

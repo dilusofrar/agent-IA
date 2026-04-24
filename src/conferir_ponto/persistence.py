@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS reports (
     report_id TEXT PRIMARY KEY,
     filename TEXT NOT NULL,
     employee_name TEXT,
+    owner_user_id TEXT,
+    owner_username TEXT,
     period_start TEXT,
     period_end TEXT,
     processed_at TEXT,
@@ -69,6 +71,8 @@ def ensure_app_db() -> Path:
     connection = sqlite3.connect(APP_DB_PATH)
     try:
         connection.executescript(SCHEMA_SQL)
+        ensure_column(connection, "reports", "owner_user_id", "TEXT")
+        ensure_column(connection, "reports", "owner_username", "TEXT")
         ensure_column(connection, "reports", "source_pdf_key", "TEXT")
         ensure_column(connection, "reports", "export_pdf_key", "TEXT")
         connection.commit()
@@ -174,6 +178,8 @@ def upsert_report_record(
     recent: dict[str, Any],
     payload: dict[str, Any],
     *,
+    owner_user_id: str | None = None,
+    owner_username: str | None = None,
     source_pdf_key: str | None = None,
     export_pdf_key: str | None = None,
     source_pdf_path: str | None = None,
@@ -191,6 +197,8 @@ def upsert_report_record(
                 report_id,
                 filename,
                 employee_name,
+                owner_user_id,
+                owner_username,
                 period_start,
                 period_end,
                 processed_at,
@@ -203,10 +211,12 @@ def upsert_report_record(
                 source_pdf_path,
                 export_pdf_path
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(report_id) DO UPDATE SET
                 filename = excluded.filename,
                 employee_name = excluded.employee_name,
+                owner_user_id = excluded.owner_user_id,
+                owner_username = excluded.owner_username,
                 period_start = excluded.period_start,
                 period_end = excluded.period_end,
                 processed_at = excluded.processed_at,
@@ -223,6 +233,8 @@ def upsert_report_record(
                 report_id,
                 filename,
                 payload.get("employeeName"),
+                owner_user_id,
+                owner_username,
                 payload.get("periodStart"),
                 payload.get("periodEnd"),
                 payload.get("processedAt"),
@@ -244,7 +256,7 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
     with open_db() as connection:
         row = connection.execute(
             """
-            SELECT filename, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
+            SELECT filename, owner_user_id, owner_username, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
             FROM reports
             WHERE report_id = ?
             """,
@@ -255,6 +267,8 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
     return {
         "reportId": report_id,
         "filename": row["filename"],
+        "ownerUserId": row["owner_user_id"],
+        "ownerUsername": row["owner_username"],
         "recent": json.loads(row["recent_json"]),
         "payload": json.loads(row["payload_json"]),
         "sourcePdfKey": row["source_pdf_key"],
@@ -278,6 +292,42 @@ def list_recent_report_records(limit: int) -> list[dict[str, Any]]:
             (max(0, int(limit)),),
         ).fetchall()
     return [json.loads(row["recent_json"]) for row in rows]
+
+
+def update_user(
+    username: str,
+    *,
+    password_hash: str | None = None,
+    role: str | None = None,
+    email: str | None = None,
+    display_name: str | None = None,
+    is_active: bool | None = None,
+) -> dict[str, Any]:
+    normalized_username = str(username or "").strip()
+    if not normalized_username:
+        raise ValueError("Nome de usuário é obrigatório.")
+    existing = load_user_by_username(normalized_username)
+    if existing is None:
+        raise ValueError("Usuário não encontrado.")
+    now = datetime.now().isoformat(timespec="seconds")
+    with open_db() as connection:
+        connection.execute(
+            """
+            UPDATE users
+            SET email = ?, display_name = ?, password_hash = ?, role = ?, is_active = ?, updated_at = ?
+            WHERE username = ?
+            """,
+            (
+                email if email is not None else existing.get("email"),
+                display_name if display_name is not None else existing.get("displayName"),
+                password_hash if password_hash is not None else existing.get("passwordHash"),
+                role if role is not None else existing.get("role"),
+                1 if (is_active if is_active is not None else existing.get("isActive")) else 0,
+                now,
+                normalized_username,
+            ),
+        )
+    return load_user_by_username(normalized_username) or {}
 
 
 def stale_report_ids(max_records: int) -> list[str]:

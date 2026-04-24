@@ -26,6 +26,7 @@ from conferir_ponto.persistence import (
     load_report_record,
     load_user_by_username,
     stale_report_ids,
+    update_user,
     upsert_user,
     upsert_report_record,
 )
@@ -50,7 +51,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.10.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 PASSWORD_HASH_ITERATIONS = 390000
@@ -128,7 +129,13 @@ async def healthcheck() -> JSONResponse:
 
 @app.get("/api/admin/session")
 async def admin_session_status(request: Request) -> JSONResponse:
-    return JSONResponse({"authenticated": is_admin_authenticated(request)})
+    current_user = get_authenticated_admin_user(request)
+    return JSONResponse(
+        {
+            "authenticated": current_user is not None,
+            "user": sanitize_user(current_user) if current_user else None,
+        }
+    )
 
 
 @app.post("/api/admin/session")
@@ -192,8 +199,36 @@ async def admin_create_user(request: Request, payload: dict[str, Any]) -> JSONRe
     return JSONResponse(sanitize_user(user), status_code=201)
 
 
+@app.put("/api/admin/users/{username}")
+async def admin_update_user(username: str, request: Request, payload: dict[str, Any]) -> JSONResponse:
+    ensure_admin(request)
+    role = payload.get("role")
+    normalized_role = str(role).strip().lower() if role is not None else None
+    if normalized_role is not None and normalized_role not in {"admin", "user"}:
+        raise HTTPException(status_code=400, detail="Perfil inválido.")
+    password = str(payload.get("password", ""))
+    normalized_email = None
+    normalized_display_name = None
+    if "email" in payload:
+        normalized_email = str(payload.get("email", "")).strip() or None
+    if "displayName" in payload:
+        normalized_display_name = str(payload.get("displayName", "")).strip() or None
+    try:
+        user = update_user(
+            username,
+            password_hash=hash_password(password) if password else None,
+            role=normalized_role,
+            email=normalized_email,
+            display_name=normalized_display_name,
+            is_active=bool(payload.get("isActive")) if "isActive" in payload else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse(sanitize_user(user))
+
+
 @app.get("/api/reports/recent")
-async def recent_reports() -> JSONResponse:
+async def recent_reports(request: Request) -> JSONResponse:
     items = load_recent_report_items(limit=RECENT_REPORTS_LIMIT)
     return JSONResponse({"items": items, "count": len(items)})
 
@@ -244,7 +279,7 @@ async def report_details(report_id: str) -> JSONResponse:
 
 
 @app.post("/api/process")
-async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
+async def process_pdf(request: Request, file: UploadFile = File(...)) -> JSONResponse:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Envie um arquivo PDF valido.")
 
@@ -287,6 +322,9 @@ async def process_pdf(file: UploadFile = File(...)) -> JSONResponse:
         "processingDurationMs": processing_duration_ms,
         "version": APP_VERSION,
     }
+    owner = get_authenticated_admin_user(request)
+    if owner is not None:
+        payload["meta"]["owner"] = sanitize_user(owner)
     while len(REPORTS) >= MAX_STORED_REPORTS:
         REPORTS.popitem(last=False)
     REPORTS[report_id] = {
@@ -423,6 +461,34 @@ def authenticate_admin_user(username: str, password: str) -> dict[str, Any] | No
     return None
 
 
+def get_authenticated_admin_user(request: Request) -> dict[str, Any] | None:
+    if not is_admin_authenticated(request):
+        return None
+    token = request.cookies.get(ADMIN_SESSION_COOKIE, "")
+    if token:
+        try:
+            token_username, _, _ = token.split(":", 2)
+        except ValueError:
+            token_username = ""
+        if token_username:
+            user = load_user_by_username(token_username)
+            if user and user.get("isActive") and user.get("role") == "admin":
+                return user
+            env_username, _ = get_admin_credentials()
+            if token_username == env_username:
+                return {
+                    "id": None,
+                    "username": env_username,
+                    "displayName": env_username,
+                    "email": None,
+                    "role": "admin",
+                    "isActive": True,
+                    "createdAt": None,
+                    "updatedAt": None,
+                }
+    return None
+
+
 def admin_session_secret() -> str:
     configured_secret = os.getenv("ADMIN_SESSION_SECRET", "").strip()
     if configured_secret:
@@ -499,6 +565,7 @@ def should_set_secure_cookie(request: Request) -> bool:
 
 
 def build_recent_report_item(report_id: str, filename: str, payload: dict[str, Any]) -> dict[str, Any]:
+    owner = payload.get("meta", {}).get("owner", {})
     return {
         "reportId": report_id,
         "filename": filename,
@@ -508,6 +575,9 @@ def build_recent_report_item(report_id: str, filename: str, payload: dict[str, A
         "processedAt": payload.get("processedAt"),
         "createdAt": payload.get("meta", {}).get("generatedAt"),
         "processingDurationMs": payload.get("meta", {}).get("processingDurationMs"),
+        "ownerUsername": owner.get("username"),
+        "ownerDisplayName": owner.get("displayName"),
+        "ownerRole": owner.get("role"),
         "summary": {
             "businessDaysProcessed": payload.get("summary", {}).get("businessDaysProcessed"),
             "inconsistencyCount": payload.get("summary", {}).get("inconsistencyCount"),
@@ -565,6 +635,8 @@ def persist_report(report_id: str, report: dict[str, Any], *, source_pdf: bytes 
         report["filename"],
         report.get("recent", {}),
         report.get("payload", {}),
+        owner_user_id=metadata.get("payload", {}).get("meta", {}).get("owner", {}).get("id"),
+        owner_username=metadata.get("payload", {}).get("meta", {}).get("owner", {}).get("username"),
         source_pdf_key=source_result.key if source_result else None,
         export_pdf_key=export_result.key,
         source_pdf_path=source_pdf_path,

@@ -529,6 +529,13 @@
         text: "Processado em " + formatDateTime(item.processedAt || item.createdAt),
       }),
     );
+    if (item.ownerUsername) {
+      meta.append(
+        createElement("span", {
+          text: "Responsável " + (item.ownerDisplayName || item.ownerUsername),
+        }),
+      );
+    }
 
     const metrics = createElement("div", { className: "recent-item-metrics" });
     metrics.append(
