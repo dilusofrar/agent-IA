@@ -421,8 +421,23 @@ async def process_pdf(request: Request, file: UploadFile = File(...)) -> JSONRes
         "recent": build_recent_report_item(report_id, file.filename, payload),
         "payload": payload,
     }
-    persist_report(report_id, REPORTS[report_id], source_pdf=content)
-    prune_persisted_reports()
+    persistence_warning = None
+    try:
+        persist_report(report_id, REPORTS[report_id], source_pdf=content)
+        prune_persisted_reports()
+    except Exception as exc:
+        persistence_warning = "Historico indisponivel nesta apuracao; resultado entregue sem persistencia."
+        payload["meta"]["persistenceWarning"] = persistence_warning
+        REPORTS[report_id]["payload"] = payload
+        REPORTS[report_id]["recent"] = build_recent_report_item(report_id, file.filename, payload)
+        LOGGER.warning(
+            "report_persistence_failed",
+            extra={
+                "report_id": report_id,
+                "upload_name": file.filename,
+                "error": str(exc),
+            },
+        )
     LOGGER.info(
         "process_completed",
         extra={
@@ -432,6 +447,7 @@ async def process_pdf(request: Request, file: UploadFile = File(...)) -> JSONRes
             "duration_ms": processing_duration_ms,
             "issues": payload["summary"]["inconsistencyCount"],
             "included_days": payload["summary"]["businessDaysProcessed"],
+            "persisted": persistence_warning is None,
         },
     )
     payload["reportId"] = report_id

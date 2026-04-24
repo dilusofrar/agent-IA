@@ -755,6 +755,36 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(recent_response.status_code, 200)
         self.assertEqual(recent_response.json()["items"][0]["ownerUsername"], "analista")
 
+    def test_process_endpoint_still_returns_summary_when_persistence_fails(self):
+        client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
+        fake_payload = {
+            "employeeName": "Teste",
+            "periodStart": "2026-04-01",
+            "periodEnd": "2026-04-30",
+            "processedAt": "2026-04-11T10:00:00",
+            "meta": {"calendarDays": 30, "includedDays": 1},
+            "schedule": {"start": "07:45", "lunchStart": "12:00", "lunchEnd": "13:00", "end": "17:00", "workingWeekdays": [0, 1, 2, 3, 4], "source": None},
+            "summary": {"businessDaysProcessed": 1, "ignoredDays": 0, "inconsistencyCount": 0, "worked": "08:00", "expected": "08:00", "balance": "00:00", "positiveBank": "00:00", "negativeBank": "00:00", "compensated": "00:00", "paidOvertime": "00:00", "overtimeBeforeLunch": "00:00", "overtimeAfterLunch": "00:00", "late": "00:00", "earlyLeave": "00:00"},
+            "diagnostics": {"calendarDays": 30, "includedDays": 1, "ignoredDays": 0, "daysWithIssues": 0, "paidOvertimeDays": 0, "lateDays": 0, "earlyLeaveDays": 0, "weekendWorkedDays": 0, "holidayWorkedDays": 0, "missingPunchDays": 0, "ignoredBreakdown": []},
+            "days": [],
+        }
+
+        with patch("conferir_ponto.web.parse_timecard_bytes", return_value=object()), patch(
+            "conferir_ponto.web.build_summary_payload", return_value=fake_payload
+        ), patch("conferir_ponto.web.export_analysis_to_pdf", return_value=b"%PDF-1.4\nowner\n"), patch(
+            "conferir_ponto.web.persist_report", side_effect=RuntimeError("storage down")
+        ):
+            response = client.post(
+                "/api/process",
+                files={"file": ("owner.pdf", b"%PDF-1.4\nfake\n", "application/pdf")},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["employeeName"], "Teste")
+        self.assertIn("persistenceWarning", payload["meta"])
+
 
 class WebHelpersTests(unittest.TestCase):
     def test_sanitize_download_name_removes_unsafe_characters(self):
