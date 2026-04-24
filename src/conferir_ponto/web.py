@@ -56,7 +56,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.15.1"
+APP_VERSION = "1.15.2"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 APP_SESSION_COOKIE = "agent_app_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -288,7 +288,30 @@ async def admin_user_history(request: Request) -> JSONResponse:
 @app.get("/api/admin/persistence")
 async def admin_persistence_status(request: Request) -> JSONResponse:
     ensure_admin(request)
-    return JSONResponse(d1_status())
+    return JSONResponse(
+        {
+            **d1_status(),
+            "storageBackend": report_storage().backend_name,
+        }
+    )
+
+
+@app.post("/api/admin/storage/diagnostics")
+async def admin_storage_diagnostics(request: Request) -> JSONResponse:
+    ensure_admin(request)
+    diagnostics = report_storage().probe()
+    status_code = 200 if diagnostics.get("ok") else 502
+    return JSONResponse(
+        {
+            "storage": diagnostics,
+            "status": {
+                **d1_status(),
+                "storageBackend": report_storage().backend_name,
+                "storageProbe": diagnostics,
+            },
+        },
+        status_code=status_code,
+    )
 
 
 @app.post("/api/admin/persistence/sync-d1")

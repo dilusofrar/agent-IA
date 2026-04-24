@@ -20,6 +20,7 @@
   const persistenceStatus = document.getElementById("admin-persistence-status");
   const persistenceJson = document.getElementById("admin-persistence-json");
   const d1SyncButton = document.getElementById("admin-d1-sync");
+  const storageCheckButton = document.getElementById("admin-storage-check");
 
   if (loginForm) {
     loginForm.addEventListener("submit", handleLoginSubmit);
@@ -50,6 +51,10 @@
 
   if (d1SyncButton) {
     d1SyncButton.addEventListener("click", handleD1Sync);
+  }
+
+  if (storageCheckButton) {
+    storageCheckButton.addEventListener("click", handleStorageCheck);
   }
 
   async function handleLoginSubmit(event) {
@@ -256,6 +261,24 @@
     }
   }
 
+  async function handleStorageCheck() {
+    setStatus(persistenceStatus, "loading", "Executando teste de escrita, leitura e limpeza no storage...");
+    try {
+      const response = await fetch("/api/admin/storage/diagnostics", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error((payload.storage && payload.storage.error) || payload.detail || "Falha ao testar o R2.");
+      }
+      renderPersistenceStatus(payload.status || {});
+      if (persistenceJson) {
+        persistenceJson.textContent = JSON.stringify(payload, null, 2);
+      }
+      setStatus(persistenceStatus, "success", "Teste de storage concluído com sucesso.");
+    } catch (error) {
+      setStatus(persistenceStatus, "error", error.message || "Falha ao testar o storage.");
+    }
+  }
+
   function populateForm(settings) {
     document.getElementById("schedule-start").value = settings.defaultSchedule.start;
     document.getElementById("schedule-lunch-start").value = settings.defaultSchedule.lunchStart;
@@ -459,13 +482,26 @@
     if (!persistenceSummary) {
       return;
     }
+    const storageProbe = status.storageProbe || null;
     const cards = [
       summaryCard("Backend atual", status.backend || "sqlite", "Estado visto pelo healthcheck do app."),
+      summaryCard("Storage ativo", status.storageBackend || "local", "Backend atual dos arquivos de relatório."),
       summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando as variáveis D1 estão configuradas no Render."),
       summaryCard("Leitura preferida", status.preferReads ? "D1" : "SQLite", "Quando ativo, o app lê primeiro do D1 e usa SQLite como fallback."),
       summaryCard("Database ID", status.databaseId || "—", "Identificador do banco D1 vinculado."),
       summaryCard("Account ID", status.accountId || "—", "Conta Cloudflare usada para a API do D1."),
     ];
+    if (storageProbe) {
+      cards.push(
+        summaryCard(
+          "Teste do storage",
+          storageProbe.ok ? "OK" : "Falhou",
+          storageProbe.bucket
+            ? "Bucket " + storageProbe.bucket + " · chave " + (storageProbe.key || "—")
+            : "Storage local de desenvolvimento",
+        ),
+      );
+    }
     persistenceSummary.replaceChildren.apply(persistenceSummary, cards);
     if (persistenceJson) {
       persistenceJson.textContent = JSON.stringify(status, null, 2);

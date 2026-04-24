@@ -440,6 +440,12 @@ p { margin: 0; }
   border-color: rgba(220, 38, 38, .25);
 }
 
+.status.is-warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: rgba(180, 83, 9, .22);
+}
+
 .spinner {
   width: 14px;
   height: 14px;

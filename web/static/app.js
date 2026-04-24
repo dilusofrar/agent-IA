@@ -9,6 +9,7 @@
   const submitBtn = document.getElementById("submit-btn");
   const statusEl = document.getElementById("status");
   const resultsEl = document.getElementById("results");
+  const resultsWarningEl = document.getElementById("results-warning");
   const employeeEl = document.getElementById("employee-name");
   const periodEl = document.getElementById("period-text");
   const summaryGrid = document.getElementById("summary-grid");
@@ -493,6 +494,7 @@
       " · Processado em " +
       formatDateTime(payload.processedAt);
 
+    renderPersistenceWarning(payload);
     renderSummary(payload.summary || {});
     renderInsights(payload);
     renderIssues(payload.days || []);
@@ -517,6 +519,25 @@
       });
     });
     summaryGrid.replaceChildren.apply(summaryGrid, cards);
+  }
+
+  function renderPersistenceWarning(payload) {
+    if (!resultsWarningEl) {
+      return;
+    }
+    const warning = payload && payload.meta ? payload.meta.persistenceWarning : "";
+    if (!warning) {
+      resultsWarningEl.hidden = true;
+      resultsWarningEl.className = "status is-warning";
+      resultsWarningEl.replaceChildren();
+      return;
+    }
+    resultsWarningEl.hidden = false;
+    resultsWarningEl.className = "status is-warning";
+    resultsWarningEl.replaceChildren(
+      createElement("strong", { text: "Persistência degradada:" }),
+      createElement("span", { text: warning }),
+    );
   }
 
   function renderInsights(payload) {

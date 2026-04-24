@@ -344,15 +344,16 @@
       <div class="admin-panel-body admin-users-layout">
         <section class="admin-users-editor">
           <div class="panel-head panel-head-inline">
-            <div>
-              <h3>Status do D1</h3>
-              <p class="muted">Assim que o banco D1 estiver criado e configurado no Render, você poderá sincronizar o estado atual para a borda.</p>
+              <div>
+                <h3>Status do D1 e R2</h3>
+                <p class="muted">Use a sincronização para o D1 e rode um teste real de gravação no storage para validar o bucket do R2.</p>
+              </div>
             </div>
-          </div>
-          <div id="admin-persistence-summary" class="insights-grid"></div>
-          <div class="admin-actions">
-            <button id="admin-d1-sync" type="button" class="btn btn-primary">Sincronizar SQLite para D1</button>
-          </div>
+            <div id="admin-persistence-summary" class="insights-grid"></div>
+            <div class="admin-actions">
+              <button id="admin-storage-check" type="button" class="btn btn-secondary">Testar escrita no R2</button>
+              <button id="admin-d1-sync" type="button" class="btn btn-primary">Sincronizar SQLite para D1</button>
+            </div>
           <div id="admin-persistence-status" class="status" role="status" aria-live="polite" hidden></div>
         </section>
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from time import time
 from typing import Protocol
+from uuid import uuid4
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,8 @@ class ReportStorage(Protocol):
     def delete(self, key: str) -> None: ...
 
     def exists(self, key: str) -> bool: ...
+
+    def probe(self) -> dict[str, object]: ...
 
     @property
     def backend_name(self) -> str: ...
@@ -46,6 +50,40 @@ class LocalReportStorage:
 
     def exists(self, key: str) -> bool:
         return self._path_for(key).exists()
+
+    def probe(self) -> dict[str, object]:
+        probe_key = f"_storage_probe/{int(time())}-{uuid4().hex}.txt"
+        payload = b"local-storage-probe"
+        try:
+            stored = self.write_bytes(probe_key, payload)
+            read_back = self.read_bytes(probe_key)
+            delete_ok = False
+            try:
+                self.delete(probe_key)
+                delete_ok = not self.exists(probe_key)
+            finally:
+                self.delete(probe_key)
+            return {
+                "backend": self.backend_name,
+                "ok": read_back == payload and delete_ok,
+                "bucket": None,
+                "key": probe_key,
+                "location": stored.location,
+                "writeOk": True,
+                "readOk": read_back == payload,
+                "deleteOk": delete_ok,
+            }
+        except Exception as exc:
+            return {
+                "backend": self.backend_name,
+                "ok": False,
+                "bucket": None,
+                "key": probe_key,
+                "writeOk": False,
+                "readOk": False,
+                "deleteOk": False,
+                "error": str(exc),
+            }
 
     def _path_for(self, key: str) -> Path:
         parts = [part for part in key.replace("\\", "/").split("/") if part]
@@ -105,6 +143,44 @@ class R2ReportStorage:
             if error_code in {"NoSuchKey", "404", "NotFound"}:
                 return False
             raise
+
+    def probe(self) -> dict[str, object]:
+        probe_key = f"_storage_probe/{int(time())}-{uuid4().hex}.txt"
+        payload = f"r2-storage-probe:{probe_key}".encode("utf-8")
+        delete_ok = False
+        try:
+            stored = self.write_bytes(probe_key, payload)
+            read_back = self.read_bytes(probe_key)
+            try:
+                self.delete(probe_key)
+                delete_ok = not self.exists(probe_key)
+            finally:
+                if not delete_ok:
+                    try:
+                        self.delete(probe_key)
+                    except Exception:
+                        pass
+            return {
+                "backend": self.backend_name,
+                "ok": read_back == payload and delete_ok,
+                "bucket": self.bucket_name,
+                "key": probe_key,
+                "location": stored.location,
+                "writeOk": True,
+                "readOk": read_back == payload,
+                "deleteOk": delete_ok,
+            }
+        except Exception as exc:
+            return {
+                "backend": self.backend_name,
+                "ok": False,
+                "bucket": self.bucket_name,
+                "key": probe_key,
+                "writeOk": False,
+                "readOk": False,
+                "deleteOk": False,
+                "error": str(exc),
+            }
 
     @property
     def backend_name(self) -> str:

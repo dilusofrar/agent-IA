@@ -476,7 +476,39 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["backend"], "sqlite")
+        self.assertEqual(response.json()["storageBackend"], "local")
         self.assertFalse(response.json()["enabled"])
+
+    def test_admin_can_run_storage_diagnostics(self):
+        class FakeStorage:
+            backend_name = "r2"
+
+            def probe(self):
+                return {
+                    "backend": "r2",
+                    "ok": True,
+                    "bucket": "rendflare",
+                    "key": "_storage_probe/test.txt",
+                    "location": "r2://rendflare/_storage_probe/test.txt",
+                    "writeOk": True,
+                    "readOk": True,
+                    "deleteOk": True,
+                }
+
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch(
+            "conferir_ponto.web.report_storage",
+            return_value=FakeStorage(),
+        ):
+            self.login_admin(client)
+            response = client.post("/api/admin/storage/diagnostics")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["storage"]["ok"])
+        self.assertEqual(payload["status"]["storageBackend"], "r2")
+        self.assertEqual(payload["status"]["storageProbe"]["bucket"], "rendflare")
 
     def test_sync_d1_requires_configuration(self):
         client = TestClient(app)
@@ -494,7 +526,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.15.1")
+        self.assertEqual(response.json()["version"], "1.15.2")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
