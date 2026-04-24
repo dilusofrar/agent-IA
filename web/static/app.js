@@ -20,7 +20,12 @@
   const healthPill = document.getElementById("health-pill");
   const sessionPill = document.getElementById("session-pill");
   const sessionLabel = document.getElementById("session-label");
+  const changePasswordBtn = document.getElementById("change-password-btn");
   const logoutBtn = document.getElementById("logout-btn");
+  const accountPanel = document.getElementById("account-panel");
+  const passwordForm = document.getElementById("password-form");
+  const passwordStatus = document.getElementById("password-status");
+  const passwordCancelBtn = document.getElementById("password-cancel-btn");
   const yearEl = document.getElementById("year");
   const recentList = document.getElementById("recent-list");
   const recentCount = document.getElementById("recent-count");
@@ -83,6 +88,21 @@
 
   if (logoutBtn) {
     logoutBtn.addEventListener("click", logoutSession);
+  }
+
+  if (changePasswordBtn) {
+    changePasswordBtn.addEventListener("click", togglePasswordPanel);
+  }
+
+  if (passwordCancelBtn) {
+    passwordCancelBtn.addEventListener("click", function () {
+      resetPasswordForm();
+      setPasswordPanelVisible(false);
+    });
+  }
+
+  if (passwordForm) {
+    passwordForm.addEventListener("submit", handlePasswordSubmit);
   }
 
   if (dropzone && fileInput) {
@@ -279,6 +299,13 @@
     if (logoutBtn) {
       logoutBtn.hidden = !user;
     }
+    if (changePasswordBtn) {
+      changePasswordBtn.hidden = !user;
+    }
+    if (!user) {
+      resetPasswordForm();
+      setPasswordPanelVisible(false);
+    }
   }
 
   async function logoutSession() {
@@ -288,6 +315,98 @@
       console.error(error);
     }
     redirectToLogin();
+  }
+
+  async function handlePasswordSubmit(event) {
+    event.preventDefault();
+    if (!passwordForm || !passwordStatus) {
+      return;
+    }
+    const currentPassword = document.getElementById("current-password").value;
+    const newPassword = document.getElementById("new-password").value;
+    const confirmPassword = document.getElementById("confirm-password").value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordStatus("error", "Preencha todos os campos da troca de senha.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus("error", "A confirmação da nova senha não confere.");
+      return;
+    }
+
+    setPasswordStatus("loading", "Atualizando sua senha...");
+    try {
+      const response = await fetch("/api/session/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword: currentPassword,
+          newPassword: newPassword,
+          confirmPassword: confirmPassword,
+        }),
+      });
+      if (response.status === 401) {
+        const payload = await parseApiResponse(response);
+        if (payload.detail === "Autenticacao necessaria.") {
+          redirectToLogin();
+          return;
+        }
+        throw new Error(payload.detail || "Não foi possível alterar a senha.");
+      }
+      const payload = await parseApiResponse(response);
+      if (!response.ok) {
+        throw new Error(payload.detail || "Não foi possível alterar a senha.");
+      }
+      resetPasswordForm();
+      setPasswordStatus("success", "Senha atualizada com sucesso.");
+    } catch (error) {
+      console.error(error);
+      setPasswordStatus("error", error && error.message ? error.message : "Falha ao atualizar a senha.");
+    }
+  }
+
+  function togglePasswordPanel() {
+    setPasswordPanelVisible(!accountPanel || accountPanel.hidden);
+    if (!accountPanel.hidden) {
+      const firstField = document.getElementById("current-password");
+      if (firstField) {
+        firstField.focus();
+      }
+    }
+  }
+
+  function setPasswordPanelVisible(visible) {
+    if (!accountPanel) {
+      return;
+    }
+    accountPanel.hidden = !visible;
+    if (changePasswordBtn) {
+      changePasswordBtn.textContent = visible ? "Fechar senha" : "Alterar senha";
+    }
+  }
+
+  function resetPasswordForm() {
+    if (passwordForm) {
+      passwordForm.reset();
+    }
+    if (passwordStatus) {
+      passwordStatus.hidden = true;
+      passwordStatus.className = "status";
+      passwordStatus.replaceChildren();
+    }
+  }
+
+  function setPasswordStatus(kind, message) {
+    if (!passwordStatus) {
+      return;
+    }
+    passwordStatus.hidden = false;
+    passwordStatus.className = "status";
+    if (kind) {
+      passwordStatus.classList.add("is-" + kind);
+    }
+    passwordStatus.replaceChildren(createElement("span", { text: message }));
   }
 
   function redirectToLogin() {

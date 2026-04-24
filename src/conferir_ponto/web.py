@@ -56,7 +56,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.14.2"
+APP_VERSION = "1.15.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 APP_SESSION_COOKIE = "agent_app_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -197,6 +197,37 @@ async def app_session_logout(request: Request) -> JSONResponse:
         secure=should_set_secure_cookie(request),
     )
     return response
+
+
+@app.post("/api/session/password")
+async def app_session_change_password(request: Request, payload: dict[str, Any]) -> JSONResponse:
+    current_user = ensure_app_user(request)
+    current_password = str(payload.get("currentPassword", ""))
+    new_password = str(payload.get("newPassword", ""))
+    confirm_password = str(payload.get("confirmPassword", ""))
+
+    if not current_password or not new_password or not confirm_password:
+        raise HTTPException(status_code=400, detail="Preencha a senha atual, a nova senha e a confirmação.")
+    if new_password != confirm_password:
+        raise HTTPException(status_code=400, detail="A confirmação da nova senha não confere.")
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="A nova senha precisa ter pelo menos 6 caracteres.")
+    if not verify_password(current_password, current_user.get("passwordHash")):
+        raise HTTPException(status_code=401, detail="A senha atual está incorreta.")
+    if verify_password(new_password, current_user.get("passwordHash")):
+        raise HTTPException(status_code=400, detail="A nova senha precisa ser diferente da senha atual.")
+
+    updated_user = update_user(
+        current_user["username"],
+        password_hash=hash_password(new_password),
+    )
+    append_user_audit_entry(
+        actor=current_user["username"],
+        target_username=current_user["username"],
+        action="self-password-change",
+        changes=["Senha alterada pelo próprio usuário."],
+    )
+    return JSONResponse({"updated": True, "user": sanitize_user(updated_user)})
 
 
 @app.get("/api/admin/session")

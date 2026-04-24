@@ -39,6 +39,9 @@
           <span class="dot"></span>
           Sistema operacional
         </span>
+        <button type="button" class="btn btn-ghost btn-compact" id="change-password-btn">
+          Alterar senha
+        </button>
         <button type="button" class="btn btn-ghost btn-compact" id="logout-btn">
           Sair
         </button>
@@ -47,6 +50,38 @@
   </header>
 
   <main class="container main">
+    <section class="panel account-panel" id="account-panel" hidden>
+      <header class="panel-head row">
+        <div>
+          <h3>Segurança da conta</h3>
+          <p class="muted">Atualize sua senha sem depender do administrador.</p>
+        </div>
+      </header>
+      <div class="account-panel-body">
+        <form id="password-form" class="account-form">
+          <div class="account-form-grid">
+            <label class="field">
+              <span>Senha atual</span>
+              <input id="current-password" type="password" autocomplete="current-password" />
+            </label>
+            <label class="field">
+              <span>Nova senha</span>
+              <input id="new-password" type="password" autocomplete="new-password" />
+            </label>
+            <label class="field">
+              <span>Confirmar nova senha</span>
+              <input id="confirm-password" type="password" autocomplete="new-password" />
+            </label>
+          </div>
+          <div class="account-actions">
+            <button type="submit" class="btn btn-primary" id="password-submit-btn">Salvar nova senha</button>
+            <button type="button" class="btn btn-ghost" id="password-cancel-btn">Cancelar</button>
+          </div>
+          <div id="password-status" class="status" role="status" aria-live="polite" hidden></div>
+        </form>
+      </div>
+    </section>
+
     <section class="hero">
       <article class="hero-copy">
         <span class="eyebrow">Análise inteligente</span>

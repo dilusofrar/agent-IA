@@ -188,6 +188,42 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("agent_app_session=", response.headers.get("set-cookie", ""))
 
+    def test_authenticated_user_can_change_own_password(self):
+        client = TestClient(app)
+        self.login_app(client, username="operador", password="senha123")
+
+        response = client.post(
+            "/api/session/password",
+            json={
+                "currentPassword": "senha123",
+                "newPassword": "novaSenha123",
+                "confirmPassword": "novaSenha123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        client.delete("/api/session")
+        old_login = client.post("/api/session", json={"username": "operador", "password": "senha123"})
+        new_login = client.post("/api/session", json={"username": "operador", "password": "novaSenha123"})
+        self.assertEqual(old_login.status_code, 401)
+        self.assertEqual(new_login.status_code, 200)
+
+    def test_change_password_rejects_incorrect_current_password(self):
+        client = TestClient(app)
+        self.login_app(client, username="operador", password="senha123")
+
+        response = client.post(
+            "/api/session/password",
+            json={
+                "currentPassword": "senhaErrada",
+                "newPassword": "novaSenha123",
+                "confirmPassword": "novaSenha123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("senha atual", response.json()["detail"].lower())
+
     def test_admin_page_redirects_when_not_authenticated(self):
         client = TestClient(app)
 
@@ -420,7 +456,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.14.2")
+        self.assertEqual(response.json()["version"], "1.15.0")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")

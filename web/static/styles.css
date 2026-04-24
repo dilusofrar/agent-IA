@@ -463,6 +463,56 @@ p { margin: 0; }
   margin-top: 24px;
 }
 
+.account-panel {
+  margin-bottom: 24px;
+}
+
+.account-panel-body {
+  padding: 20px 24px 24px;
+}
+
+.account-form {
+  display: grid;
+  gap: 16px;
+}
+
+.account-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.field input {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.field input:focus {
+  outline: 2px solid rgba(91, 91, 246, .18);
+  border-color: var(--primary);
+}
+
+.account-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .results-head {
   display: flex;
   align-items: flex-end;
@@ -1284,6 +1334,7 @@ p { margin: 0; }
 
   .upload-card { order: -1; }
   .results-overview { grid-template-columns: 1fr; }
+  .account-form-grid,
   .auth-layout,
   .admin-grid,
   .admin-users-layout { grid-template-columns: 1fr; }
@@ -1343,6 +1394,7 @@ p { margin: 0; }
   .admin-user-actions .btn { width: 100%; }
   .search-field { min-width: 100%; }
   .recent-item-actions .btn { width: 100%; }
+  .account-actions .btn { width: 100%; }
 }
 
 @media (max-width: 420px) {
