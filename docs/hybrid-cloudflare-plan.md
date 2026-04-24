@@ -8,6 +8,7 @@ metadata and settings persistence for a future move to Cloudflare D1 + R2.
 - Render: FastAPI app, PDF parsing, report generation.
 - Storage abstraction: report/source files are stored behind a local object-like storage layer.
 - SQLite metadata store: local development and Render-compatible stand-in for D1.
+- Optional D1 mirror: when configured, the app mirrors metadata, users and settings audit to Cloudflare D1 over the REST API.
 
 ## D1-ready tables
 
@@ -43,7 +44,19 @@ If any of these are missing, the app falls back to local storage automatically.
 
 ## Next migration steps
 
-1. Replace the local storage adapter with R2 object writes.
-2. Switch recent reports and settings audit reads from local SQLite to D1.
-3. Expand `users` into full login/session ownership in D1.
-4. Filter report history and exports by owner so common users only see their own data.
+1. Create the D1 database in Cloudflare with a name such as `agent-ia-ponto`.
+2. Set `D1_ACCOUNT_ID`, `D1_DATABASE_ID` and `D1_API_TOKEN` in Render.
+3. Let the app bootstrap the schema automatically from `docs/d1-schema.sql`.
+4. Observe `healthz` until `persistenceBackend` changes from `sqlite` to `sqlite+d1`.
+5. After validation, move session/login ownership fully into D1 and filter report history by owner.
+
+## D1 runtime variables
+
+- `D1_ACCOUNT_ID`
+- `D1_DATABASE_ID`
+- `D1_API_TOKEN`
+- optional: `D1_API_BASE_URL` (defaults to `https://api.cloudflare.com/client/v4`)
+
+The D1 API token needs at least `D1 Read` and `D1 Write` permissions on the target account, as described in the Cloudflare REST API docs:
+- [Create D1 Database](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/get/)
+- [Query D1 Database](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/)

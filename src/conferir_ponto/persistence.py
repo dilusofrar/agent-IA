@@ -3,14 +3,19 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 import json
+import logging
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
 from uuid import uuid4
 
+from conferir_ponto.d1_api import D1ApiClient, d1_from_env
+
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 APP_DB_PATH = BASE_DIR / "data" / "app.db"
+LOGGER = logging.getLogger("conferir_ponto.persistence")
+_D1_CLIENT: D1ApiClient | None | bool = False
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS reports (
@@ -104,6 +109,57 @@ def open_db() -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
+def d1_client() -> D1ApiClient | None:
+    global _D1_CLIENT
+    if _D1_CLIENT is False:
+        client = d1_from_env()
+        if client is not None:
+            try:
+                client.ensure_schema()
+            except Exception as exc:
+                LOGGER.warning("d1_schema_ensure_failed", extra={"error": str(exc)})
+                client = None
+        _D1_CLIENT = client
+    return _D1_CLIENT if _D1_CLIENT is not False else None
+
+
+def persistence_backend_name() -> str:
+    return "sqlite+d1" if d1_client() is not None else "sqlite"
+
+
+def mirror_execute(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> None:
+    client = d1_client()
+    if client is None:
+        return
+    try:
+        client.execute(sql, list(params))
+    except Exception as exc:
+        LOGGER.warning("d1_mirror_execute_failed", extra={"error": str(exc), "sql": sql})
+
+
+def mirror_fetch_one(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> dict[str, Any] | None:
+    client = d1_client()
+    if client is None:
+        return None
+    try:
+        rows = client.query(sql, list(params))
+    except Exception as exc:
+        LOGGER.warning("d1_mirror_fetch_failed", extra={"error": str(exc), "sql": sql})
+        return None
+    return rows[0] if rows else None
+
+
+def mirror_fetch_all(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list[dict[str, Any]]:
+    client = d1_client()
+    if client is None:
+        return []
+    try:
+        return client.query(sql, list(params))
+    except Exception as exc:
+        LOGGER.warning("d1_mirror_fetch_failed", extra={"error": str(exc), "sql": sql})
+        return []
+
+
 def save_current_settings_payload(payload: dict[str, Any]) -> None:
     updated_at = datetime.now().isoformat(timespec="seconds")
     with open_db() as connection:
@@ -117,19 +173,41 @@ def save_current_settings_payload(payload: dict[str, Any]) -> None:
             """,
             ("global", json.dumps(payload, ensure_ascii=False), updated_at),
         )
+    mirror_execute(
+        """
+        INSERT INTO settings_current (scope, payload_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(scope) DO UPDATE SET
+            payload_json = excluded.payload_json,
+            updated_at = excluded.updated_at
+        """,
+        ("global", json.dumps(payload, ensure_ascii=False), updated_at),
+    )
 
 
 def load_current_settings_payload() -> dict[str, Any] | None:
     if not APP_DB_PATH.exists():
-        return None
+        d1_row = mirror_fetch_one(
+            "SELECT payload_json FROM settings_current WHERE scope = ?",
+            ("global",),
+        )
+        if d1_row is None:
+            return None
+        return json.loads(d1_row["payload_json"])
     with open_db() as connection:
         row = connection.execute(
             "SELECT payload_json FROM settings_current WHERE scope = ?",
             ("global",),
         ).fetchone()
-    if row is None:
+    if row is not None:
+        return json.loads(row["payload_json"])
+    d1_row = mirror_fetch_one(
+        "SELECT payload_json FROM settings_current WHERE scope = ?",
+        ("global",),
+    )
+    if d1_row is None:
         return None
-    return json.loads(row["payload_json"])
+    return json.loads(d1_row["payload_json"])
 
 
 def append_settings_audit_entry(entry: dict[str, Any]) -> None:
@@ -146,11 +224,40 @@ def append_settings_audit_entry(entry: dict[str, Any]) -> None:
                 json.dumps(entry.get("settings", {}), ensure_ascii=False),
             ),
         )
+    mirror_execute(
+        """
+        INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            entry["changedAt"],
+            entry["actor"],
+            json.dumps(entry.get("changes", []), ensure_ascii=False),
+            json.dumps(entry.get("settings", {}), ensure_ascii=False),
+        ),
+    )
 
 
 def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
     if not APP_DB_PATH.exists():
-        return []
+        d1_rows = mirror_fetch_all(
+            """
+            SELECT changed_at, actor, changes_json, settings_json
+            FROM settings_audit
+            ORDER BY changed_at DESC
+            LIMIT ?
+            """,
+            (max(0, int(limit)),),
+        )
+        return [
+            {
+                "changedAt": row["changed_at"],
+                "actor": row["actor"],
+                "changes": json.loads(row["changes_json"]),
+                "settings": json.loads(row["settings_json"]),
+            }
+            for row in d1_rows
+        ]
     with open_db() as connection:
         rows = connection.execute(
             """
@@ -161,6 +268,25 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
             """,
             (max(0, int(limit)),),
         ).fetchall()
+    if rows:
+        return [
+            {
+                "changedAt": row["changed_at"],
+                "actor": row["actor"],
+                "changes": json.loads(row["changes_json"]),
+                "settings": json.loads(row["settings_json"]),
+            }
+            for row in rows
+        ]
+    d1_rows = mirror_fetch_all(
+        """
+        SELECT changed_at, actor, changes_json, settings_json
+        FROM settings_audit
+        ORDER BY changed_at DESC
+        LIMIT ?
+        """,
+        (max(0, int(limit)),),
+    )
     return [
         {
             "changedAt": row["changed_at"],
@@ -168,7 +294,7 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
             "changes": json.loads(row["changes_json"]),
             "settings": json.loads(row["settings_json"]),
         }
-        for row in rows
+        for row in d1_rows
     ]
 
 
@@ -248,11 +374,89 @@ def upsert_report_record(
                 export_pdf_path,
             ),
         )
+    mirror_execute(
+        """
+        INSERT INTO reports (
+            report_id,
+            filename,
+            employee_name,
+            owner_user_id,
+            owner_username,
+            period_start,
+            period_end,
+            processed_at,
+            created_at,
+            processing_duration_ms,
+            recent_json,
+            payload_json,
+            source_pdf_key,
+            export_pdf_key,
+            source_pdf_path,
+            export_pdf_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(report_id) DO UPDATE SET
+            filename = excluded.filename,
+            employee_name = excluded.employee_name,
+            owner_user_id = excluded.owner_user_id,
+            owner_username = excluded.owner_username,
+            period_start = excluded.period_start,
+            period_end = excluded.period_end,
+            processed_at = excluded.processed_at,
+            created_at = excluded.created_at,
+            processing_duration_ms = excluded.processing_duration_ms,
+            recent_json = excluded.recent_json,
+            payload_json = excluded.payload_json,
+            source_pdf_key = excluded.source_pdf_key,
+            export_pdf_key = excluded.export_pdf_key,
+            source_pdf_path = excluded.source_pdf_path,
+            export_pdf_path = excluded.export_pdf_path
+        """,
+        (
+            report_id,
+            filename,
+            payload.get("employeeName"),
+            owner_user_id,
+            owner_username,
+            payload.get("periodStart"),
+            payload.get("periodEnd"),
+            payload.get("processedAt"),
+            created_at,
+            payload.get("meta", {}).get("processingDurationMs"),
+            json.dumps(recent, ensure_ascii=False),
+            json.dumps(payload, ensure_ascii=False),
+            source_pdf_key,
+            export_pdf_key,
+            source_pdf_path,
+            export_pdf_path,
+        ),
+    )
 
 
 def load_report_record(report_id: str) -> dict[str, Any] | None:
     if not APP_DB_PATH.exists():
-        return None
+        selected_row = mirror_fetch_one(
+            """
+            SELECT filename, owner_user_id, owner_username, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
+            FROM reports
+            WHERE report_id = ?
+            """,
+            (report_id,),
+        )
+        if selected_row is None:
+            return None
+        return {
+            "reportId": report_id,
+            "filename": selected_row["filename"],
+            "ownerUserId": selected_row["owner_user_id"],
+            "ownerUsername": selected_row["owner_username"],
+            "recent": json.loads(selected_row["recent_json"]),
+            "payload": json.loads(selected_row["payload_json"]),
+            "sourcePdfKey": selected_row["source_pdf_key"],
+            "exportPdfKey": selected_row["export_pdf_key"],
+            "sourcePdfPath": selected_row["source_pdf_path"],
+            "exportPdfPath": selected_row["export_pdf_path"],
+        }
     with open_db() as connection:
         row = connection.execute(
             """
@@ -262,25 +466,44 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
             """,
             (report_id,),
         ).fetchone()
-    if row is None:
+    selected_row: Any = row
+    if selected_row is None:
+        selected_row = mirror_fetch_one(
+            """
+            SELECT filename, owner_user_id, owner_username, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
+            FROM reports
+            WHERE report_id = ?
+            """,
+            (report_id,),
+        )
+    if selected_row is None:
         return None
     return {
         "reportId": report_id,
-        "filename": row["filename"],
-        "ownerUserId": row["owner_user_id"],
-        "ownerUsername": row["owner_username"],
-        "recent": json.loads(row["recent_json"]),
-        "payload": json.loads(row["payload_json"]),
-        "sourcePdfKey": row["source_pdf_key"],
-        "exportPdfKey": row["export_pdf_key"],
-        "sourcePdfPath": row["source_pdf_path"],
-        "exportPdfPath": row["export_pdf_path"],
+        "filename": selected_row["filename"],
+        "ownerUserId": selected_row["owner_user_id"],
+        "ownerUsername": selected_row["owner_username"],
+        "recent": json.loads(selected_row["recent_json"]),
+        "payload": json.loads(selected_row["payload_json"]),
+        "sourcePdfKey": selected_row["source_pdf_key"],
+        "exportPdfKey": selected_row["export_pdf_key"],
+        "sourcePdfPath": selected_row["source_pdf_path"],
+        "exportPdfPath": selected_row["export_pdf_path"],
     }
 
 
 def list_recent_report_records(limit: int) -> list[dict[str, Any]]:
     if not APP_DB_PATH.exists():
-        return []
+        d1_rows = mirror_fetch_all(
+            """
+            SELECT recent_json
+            FROM reports
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (max(0, int(limit)),),
+        )
+        return [json.loads(row["recent_json"]) for row in d1_rows]
     with open_db() as connection:
         rows = connection.execute(
             """
@@ -291,7 +514,18 @@ def list_recent_report_records(limit: int) -> list[dict[str, Any]]:
             """,
             (max(0, int(limit)),),
         ).fetchall()
-    return [json.loads(row["recent_json"]) for row in rows]
+    if rows:
+        return [json.loads(row["recent_json"]) for row in rows]
+    d1_rows = mirror_fetch_all(
+        """
+        SELECT recent_json
+        FROM reports
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (max(0, int(limit)),),
+    )
+    return [json.loads(row["recent_json"]) for row in d1_rows]
 
 
 def update_user(
@@ -327,6 +561,22 @@ def update_user(
                 normalized_username,
             ),
         )
+    mirror_execute(
+        """
+        UPDATE users
+        SET email = ?, display_name = ?, password_hash = ?, role = ?, is_active = ?, updated_at = ?
+        WHERE username = ?
+        """,
+        (
+            email if email is not None else existing.get("email"),
+            display_name if display_name is not None else existing.get("displayName"),
+            password_hash if password_hash is not None else existing.get("passwordHash"),
+            role if role is not None else existing.get("role"),
+            1 if (is_active if is_active is not None else existing.get("isActive")) else 0,
+            now,
+            normalized_username,
+        ),
+    )
     return load_user_by_username(normalized_username) or {}
 
 
@@ -348,17 +598,39 @@ def stale_report_ids(max_records: int) -> list[str]:
 
 def delete_report_record(report_id: str) -> None:
     if not APP_DB_PATH.exists():
+        mirror_execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
         return
     with open_db() as connection:
         connection.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
+    mirror_execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
 
 
 def load_user_by_username(username: str) -> dict[str, Any] | None:
-    if not APP_DB_PATH.exists():
-        return None
     normalized_username = str(username or "").strip()
     if not normalized_username:
         return None
+    if not APP_DB_PATH.exists():
+        selected_row = mirror_fetch_one(
+            """
+            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            FROM users
+            WHERE username = ?
+            """,
+            (normalized_username,),
+        )
+        if selected_row is None:
+            return None
+        return {
+            "id": selected_row["id"],
+            "username": selected_row["username"],
+            "email": selected_row["email"],
+            "displayName": selected_row["display_name"],
+            "passwordHash": selected_row["password_hash"],
+            "role": selected_row["role"],
+            "isActive": bool(selected_row["is_active"]),
+            "createdAt": selected_row["created_at"],
+            "updatedAt": selected_row["updated_at"],
+        }
     with open_db() as connection:
         row = connection.execute(
             """
@@ -368,24 +640,55 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
             """,
             (normalized_username,),
         ).fetchone()
-    if row is None:
+    selected_row: Any = row
+    if selected_row is None:
+        selected_row = mirror_fetch_one(
+            """
+            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            FROM users
+            WHERE username = ?
+            """,
+            (normalized_username,),
+        )
+    if selected_row is None:
         return None
     return {
-        "id": row["id"],
-        "username": row["username"],
-        "email": row["email"],
-        "displayName": row["display_name"],
-        "passwordHash": row["password_hash"],
-        "role": row["role"],
-        "isActive": bool(row["is_active"]),
-        "createdAt": row["created_at"],
-        "updatedAt": row["updated_at"],
+        "id": selected_row["id"],
+        "username": selected_row["username"],
+        "email": selected_row["email"],
+        "displayName": selected_row["display_name"],
+        "passwordHash": selected_row["password_hash"],
+        "role": selected_row["role"],
+        "isActive": bool(selected_row["is_active"]),
+        "createdAt": selected_row["created_at"],
+        "updatedAt": selected_row["updated_at"],
     }
 
 
 def list_users(limit: int = 100) -> list[dict[str, Any]]:
     if not APP_DB_PATH.exists():
-        return []
+        selected_rows = mirror_fetch_all(
+            """
+            SELECT id, username, email, display_name, role, is_active, created_at, updated_at
+            FROM users
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        )
+        return [
+            {
+                "id": row["id"],
+                "username": row["username"],
+                "email": row["email"],
+                "displayName": row["display_name"],
+                "role": row["role"],
+                "isActive": bool(row["is_active"]),
+                "createdAt": row["created_at"],
+                "updatedAt": row["updated_at"],
+            }
+            for row in selected_rows
+        ]
     with open_db() as connection:
         rows = connection.execute(
             """
@@ -396,6 +699,17 @@ def list_users(limit: int = 100) -> list[dict[str, Any]]:
             """,
             (max(1, int(limit)),),
         ).fetchall()
+    selected_rows: Any = rows
+    if not selected_rows:
+        selected_rows = mirror_fetch_all(
+            """
+            SELECT id, username, email, display_name, role, is_active, created_at, updated_at
+            FROM users
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        )
     return [
         {
             "id": row["id"],
@@ -407,7 +721,7 @@ def list_users(limit: int = 100) -> list[dict[str, Any]]:
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
-        for row in rows
+        for row in selected_rows
     ]
 
 
@@ -451,6 +765,25 @@ def create_user(
                 now,
             ),
         )
+    mirror_execute(
+        """
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            normalized_username,
+            email,
+            display_name,
+            password_hash,
+            role,
+            1 if is_active else 0,
+            now,
+            now,
+        ),
+    )
     return load_user_by_username(normalized_username) or {}
 
 
@@ -506,4 +839,30 @@ def upsert_user(
                     normalized_username,
                 ),
             )
+    mirror_execute(
+        """
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+            email = excluded.email,
+            display_name = excluded.display_name,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            is_active = excluded.is_active,
+            updated_at = excluded.updated_at
+        """,
+        (
+            existing.get("id") if existing else uuid4().hex,
+            normalized_username,
+            email,
+            display_name,
+            password_hash,
+            role,
+            1 if is_active else 0,
+            existing.get("createdAt") if existing else now,
+            now,
+        ),
+    )
     return load_user_by_username(normalized_username) or {}

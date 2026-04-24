@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from conferir_ponto.persistence import create_user
+import conferir_ponto.persistence as persistence_module
 from conferir_ponto.storage import LocalReportStorage, storage_from_env
 from conferir_ponto.web import REPORTS, app, hash_password, sanitize_download_name
 import conferir_ponto.web as web_module
@@ -23,6 +25,7 @@ class WebAppTests(unittest.TestCase):
     def setUp(self):
         REPORTS.clear()
         web_module._REPORT_STORAGE = None
+        persistence_module._D1_CLIENT = False
         self._temp_dir = TemporaryDirectory()
         self._db_patcher = patch(
             "conferir_ponto.persistence.APP_DB_PATH",
@@ -33,6 +36,7 @@ class WebAppTests(unittest.TestCase):
     def tearDown(self):
         self._db_patcher.stop()
         web_module._REPORT_STORAGE = None
+        persistence_module._D1_CLIENT = False
         self._temp_dir.cleanup()
 
     def login_admin(self, client: TestClient, username: str = "admin", password: str = "secret123"):
@@ -238,10 +242,20 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.10.0")
+        self.assertEqual(response.json()["version"], "1.11.0")
         self.assertEqual(response.json()["storageBackend"], "local")
+        self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
+
+    def test_healthcheck_reports_d1_mirror_when_available(self):
+        client = TestClient(app)
+        persistence_module._D1_CLIENT = SimpleNamespace()
+
+        response = client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["persistenceBackend"], "sqlite+d1")
 
     def test_get_settings_returns_persisted_configuration(self):
         client = TestClient(app)

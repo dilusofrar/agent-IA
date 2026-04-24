@@ -25,6 +25,7 @@ from conferir_ponto.persistence import (
     list_recent_report_records,
     load_report_record,
     load_user_by_username,
+    persistence_backend_name,
     stale_report_ids,
     update_user,
     upsert_user,
@@ -51,7 +52,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.10.0"
+APP_VERSION = "1.11.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 PASSWORD_HASH_ITERATIONS = 390000
@@ -123,6 +124,7 @@ async def healthcheck() -> JSONResponse:
             "status": "ok",
             "version": APP_VERSION,
             "storageBackend": report_storage().backend_name,
+            "persistenceBackend": persistence_backend_name(),
         }
     )
 
