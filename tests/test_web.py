@@ -818,6 +818,27 @@ class WebHelpersTests(unittest.TestCase):
         mocked_storage.assert_called_once()
         self.assertEqual(storage.backend_name, "r2")
 
+    def test_update_user_uses_upsert_for_d1_mirror(self):
+        with TemporaryDirectory() as temp_dir:
+            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
+                "conferir_ponto.persistence.mirror_execute"
+            ) as mocked_mirror_execute:
+                create_user(
+                    username="operador",
+                    password_hash=hash_password("senha123"),
+                    role="user",
+                    display_name="Operador",
+                )
+
+                persistence_module.update_user(
+                    "operador",
+                    role="admin",
+                    display_name="Operador Lider",
+                )
+
+        sql = mocked_mirror_execute.call_args_list[-1].args[0]
+        self.assertIn("ON CONFLICT(username) DO UPDATE", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -753,18 +753,28 @@ def update_user(
         )
     mirror_execute(
         """
-        UPDATE users
-        SET email = ?, display_name = ?, password_hash = ?, role = ?, is_active = ?, updated_at = ?
-        WHERE username = ?
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+            email = excluded.email,
+            display_name = excluded.display_name,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            is_active = excluded.is_active,
+            updated_at = excluded.updated_at
         """,
         (
+            existing.get("id"),
+            normalized_username,
             email if email is not None else existing.get("email"),
             display_name if display_name is not None else existing.get("displayName"),
             password_hash if password_hash is not None else existing.get("passwordHash"),
             role if role is not None else existing.get("role"),
             1 if (is_active if is_active is not None else existing.get("isActive")) else 0,
+            existing.get("createdAt"),
             now,
-            normalized_username,
         ),
     )
     return load_user_by_username(normalized_username) or {}
