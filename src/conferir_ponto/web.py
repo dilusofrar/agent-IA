@@ -91,6 +91,18 @@ LOGGER = logging.getLogger("conferir_ponto.web")
 _REPORT_STORAGE: ReportStorage | None = None
 
 
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(request: Request, exc: Exception) -> JSONResponse:
+    LOGGER.exception(
+        "unhandled_request_error",
+        extra={"path": request.url.path, "method": request.method},
+    )
+    return JSONResponse(
+        {"detail": "Erro interno ao processar a solicitacao."},
+        status_code=500,
+    )
+
+
 @app.middleware("http")
 async def apply_security_headers(request: Request, call_next) -> Response:
     response = await call_next(request)

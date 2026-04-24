@@ -168,7 +168,7 @@
           redirectToLogin();
           return;
         }
-        const payload = await response.json();
+        const payload = await parseApiResponse(response);
         if (!response.ok) {
           throw new Error(payload.detail || "Erro ao processar o arquivo.");
         }
@@ -212,10 +212,10 @@
         redirectToLogin();
         return;
       }
+      const payload = await parseApiResponse(response);
       if (!response.ok) {
         throw new Error("Falha ao carregar histórico");
       }
-      const payload = await response.json();
       renderRecentReports(payload.items || []);
     } catch (error) {
       recentCount.textContent = "0";
@@ -227,10 +227,10 @@
   async function fetchSettings() {
     try {
       const response = await fetch("/api/settings/public", { method: "GET" });
+      const payload = await parseApiResponse(response);
       if (!response.ok) {
         throw new Error("Falha ao carregar regras");
       }
-      const payload = await response.json();
       state.settings = payload;
       renderSettingsSummary(payload);
     } catch (error) {
@@ -245,10 +245,10 @@
         redirectToLogin();
         return;
       }
+      const payload = await parseApiResponse(response);
       if (!response.ok) {
         throw new Error("Falha ao carregar sessão");
       }
-      const payload = await response.json();
       renderSession(payload && payload.user ? payload.user : null);
     } catch (error) {
       console.error(error);
@@ -292,6 +292,23 @@
 
   function redirectToLogin() {
     window.location.replace("/login");
+  }
+
+  async function parseApiResponse(response) {
+    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    if (contentType.indexOf("application/json") >= 0) {
+      return response.json();
+    }
+
+    const text = await response.text();
+    if (!text) {
+      return {};
+    }
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      return { detail: text };
+    }
   }
 
   function setSubmitState(isBusy) {
@@ -649,7 +666,7 @@
         redirectToLogin();
         return;
       }
-      const payload = await response.json();
+      const payload = await parseApiResponse(response);
       if (!response.ok) {
         throw new Error(payload.detail || "Não foi possível reabrir o relatório.");
       }
