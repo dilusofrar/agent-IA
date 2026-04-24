@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Acesso autenticado à aplicação de apuração de ponto." />
+  <title>Entrar · Apuração de Ponto</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="/login" class="brand" aria-label="Apuração de Ponto">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="16" rx="3"></rect>
+            <path d="M3 10h18"></path>
+            <path d="M8 2v4M16 2v4"></path>
+          </svg>
+        </span>
+        <span class="brand-copy">
+          <strong>Apuração de Ponto</strong>
+          <small>Acesso autenticado</small>
+        </span>
+      </a>
+    </div>
+  </header>
+
+  <main class="container main auth-shell">
+    <section class="auth-layout">
+      <article class="auth-copy">
+        <span class="eyebrow">Área protegida</span>
+        <h1>
+          Entre para acessar
+          <span class="grad">sua central de apurações</span>
+        </h1>
+        <p class="lede">
+          O histórico, o processamento e a exportação agora ficam protegidos por usuário.
+          Cada colaborador enxerga o próprio histórico, enquanto administradores mantêm visão completa.
+        </p>
+
+        <ul class="rules">
+          <li><span class="check">✓</span> Histórico filtrado por usuário</li>
+          <li><span class="check">✓</span> Exportação e reabertura protegidas</li>
+          <li><span class="check">✓</span> Integração com usuários persistidos no D1</li>
+        </ul>
+      </article>
+
+      <section class="admin-auth-card auth-card">
+        <span class="eyebrow">Login</span>
+        <h2>Entrar na aplicação</h2>
+        <p class="lede">Use seu usuário e senha para abrir a tela principal.</p>
+
+        <form id="app-login-form" class="admin-form" novalidate>
+          <label class="admin-field">
+            <span>Usuário</span>
+            <input id="app-username" name="username" type="text" autocomplete="username" required />
+          </label>
+
+          <label class="admin-field">
+            <span>Senha</span>
+            <input id="app-password" name="password" type="password" autocomplete="current-password" required />
+          </label>
+
+          <button type="submit" class="btn btn-primary">
+            <span class="btn-label">Entrar na aplicação</span>
+          </button>
+        </form>
+
+        <div id="app-login-status" class="status" role="status" aria-live="polite" hidden></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/static/login.js" defer></script>
+</body>
+</html>

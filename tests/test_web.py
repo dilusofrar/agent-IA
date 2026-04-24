@@ -45,9 +45,22 @@ class WebAppTests(unittest.TestCase):
             json={"username": username, "password": password},
         )
 
+    def login_app(self, client: TestClient, username: str = "operador", password: str = "senha123", role: str = "user"):
+        create_user(
+            username=username,
+            password_hash=hash_password(password),
+            role=role,
+            display_name=username.title(),
+        )
+        return client.post(
+            "/api/session",
+            json={"username": username, "password": password},
+        )
+
     def test_process_endpoint_returns_summary(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "fev2026.pdf"
         client = TestClient(app)
+        self.login_app(client)
 
         with pdf_path.open("rb") as file:
             response = client.post(
@@ -71,6 +84,7 @@ class WebAppTests(unittest.TestCase):
     def test_export_endpoint_returns_pdf(self):
         pdf_path = PROJECT_ROOT / "data" / "inputs" / "DIEGO_LUCAS_SOARES_DE_FREITAS_ARAUJO.pdf"
         client = TestClient(app)
+        self.login_app(client)
 
         with pdf_path.open("rb") as file:
             process_response = client.post(
@@ -90,6 +104,7 @@ class WebAppTests(unittest.TestCase):
 
     def test_process_endpoint_rejects_large_pdf(self):
         client = TestClient(app)
+        self.login_app(client)
         oversized_content = b"%PDF-1.4\n" + (b"0" * (10 * 1024 * 1024))
 
         response = client.post(
@@ -102,9 +117,18 @@ class WebAppTests(unittest.TestCase):
 
     def test_export_endpoint_sanitizes_download_filename(self):
         client = TestClient(app)
+        self.login_app(client, username="adminuser", password="senha123", role="admin")
         REPORTS["report-safe"] = {
             "filename": 'evil"\r\nX-Test: injected.pdf',
             "pdf": b"%PDF-1.4\nsafe\n",
+            "payload": {
+                "meta": {
+                    "owner": {
+                        "username": "adminuser",
+                        "role": "admin",
+                    }
+                }
+            },
         }
 
         response = client.get("/api/export/report-safe")
@@ -129,6 +153,40 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/docs")
 
         self.assertEqual(response.status_code, 404)
+
+    def test_main_page_redirects_to_login_when_not_authenticated(self):
+        client = TestClient(app)
+
+        response = client.get("/", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/login")
+
+    def test_app_login_sets_session_cookie(self):
+        client = TestClient(app)
+
+        response = self.login_app(client)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("agent_app_session", response.headers.get("set-cookie", ""))
+
+    def test_authenticated_user_can_open_main_page(self):
+        client = TestClient(app)
+        self.login_app(client)
+
+        response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Apuração de Ponto", response.text)
+
+    def test_app_logout_clears_session_cookie(self):
+        client = TestClient(app)
+        self.login_app(client)
+
+        response = client.delete("/api/session")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("agent_app_session=", response.headers.get("set-cookie", ""))
 
     def test_admin_page_redirects_when_not_authenticated(self):
         client = TestClient(app)
@@ -263,7 +321,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.13.0")
+        self.assertEqual(response.json()["version"], "1.14.0")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
@@ -437,6 +495,7 @@ class WebAppTests(unittest.TestCase):
 
     def test_recent_reports_endpoint_returns_latest_items(self):
         client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
         with TemporaryDirectory() as temp_dir, patch("conferir_ponto.web.REPORTS_DIR", Path(temp_dir)):
             REPORTS["first"] = {
                 "filename": "a.pdf",
@@ -450,9 +509,11 @@ class WebAppTests(unittest.TestCase):
                     "processedAt": "2026-04-22T10:00:00",
                     "createdAt": "2026-04-22T10:00:00",
                     "processingDurationMs": 120,
+                    "ownerUsername": "viewer",
                     "summary": {"businessDaysProcessed": 20, "inconsistencyCount": 1, "balance": "00:10", "paidOvertime": "00:00"},
                     "diagnostics": {"ignoredDays": 2},
                 },
+                "payload": {"meta": {"owner": {"username": "viewer", "role": "user"}}},
             }
             REPORTS["second"] = {
                 "filename": "b.pdf",
@@ -466,9 +527,11 @@ class WebAppTests(unittest.TestCase):
                     "processedAt": "2026-05-22T10:00:00",
                     "createdAt": "2026-05-22T10:00:00",
                     "processingDurationMs": 95,
+                    "ownerUsername": "viewer",
                     "summary": {"businessDaysProcessed": 21, "inconsistencyCount": 0, "balance": "01:00", "paidOvertime": "02:00"},
                     "diagnostics": {"ignoredDays": 0},
                 },
+                "payload": {"meta": {"owner": {"username": "viewer", "role": "user"}}},
             }
 
             response = client.get("/api/reports/recent")
@@ -481,16 +544,17 @@ class WebAppTests(unittest.TestCase):
 
     def test_recent_reports_endpoint_reads_persisted_items(self):
         client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
         with TemporaryDirectory() as temp_dir:
             reports_dir = Path(temp_dir)
             reports_dir.joinpath("reports", "older").mkdir(parents=True)
             reports_dir.joinpath("reports", "older", "metadata.json").write_text(
-                '{"reportId":"older","filename":"older.pdf","recent":{"reportId":"older","filename":"older.pdf","employeeName":"Mais antigo","createdAt":"2026-04-22T10:00:00","summary":{"balance":"00:10","inconsistencyCount":1,"paidOvertime":"00:00","businessDaysProcessed":20},"diagnostics":{}}}',
+                '{"reportId":"older","filename":"older.pdf","recent":{"reportId":"older","filename":"older.pdf","employeeName":"Mais antigo","createdAt":"2026-04-22T10:00:00","ownerUsername":"viewer","summary":{"balance":"00:10","inconsistencyCount":1,"paidOvertime":"00:00","businessDaysProcessed":20},"diagnostics":{}}}',
                 encoding="utf-8",
             )
             reports_dir.joinpath("reports", "newer").mkdir(parents=True)
             reports_dir.joinpath("reports", "newer", "metadata.json").write_text(
-                '{"reportId":"newer","filename":"newer.pdf","recent":{"reportId":"newer","filename":"newer.pdf","employeeName":"Mais novo","createdAt":"2026-04-23T10:00:00","summary":{"balance":"01:00","inconsistencyCount":0,"paidOvertime":"02:00","businessDaysProcessed":21},"diagnostics":{}}}',
+                '{"reportId":"newer","filename":"newer.pdf","recent":{"reportId":"newer","filename":"newer.pdf","employeeName":"Mais novo","createdAt":"2026-04-23T10:00:00","ownerUsername":"viewer","summary":{"balance":"01:00","inconsistencyCount":0,"paidOvertime":"02:00","businessDaysProcessed":21},"diagnostics":{}}}',
                 encoding="utf-8",
             )
             with patch("conferir_ponto.web.REPORTS_DIR", reports_dir):
@@ -501,14 +565,38 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(payload["items"][0]["reportId"], "newer")
         self.assertEqual(payload["items"][1]["reportId"], "older")
 
+    def test_recent_reports_endpoint_filters_items_by_authenticated_user(self):
+        client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
+        with TemporaryDirectory() as temp_dir:
+            reports_dir = Path(temp_dir)
+            reports_dir.joinpath("reports", "viewer-report").mkdir(parents=True)
+            reports_dir.joinpath("reports", "viewer-report", "metadata.json").write_text(
+                '{"reportId":"viewer-report","filename":"viewer.pdf","recent":{"reportId":"viewer-report","ownerUsername":"viewer","createdAt":"2026-04-23T10:00:00"}}',
+                encoding="utf-8",
+            )
+            reports_dir.joinpath("reports", "other-report").mkdir(parents=True)
+            reports_dir.joinpath("reports", "other-report", "metadata.json").write_text(
+                '{"reportId":"other-report","filename":"other.pdf","recent":{"reportId":"other-report","ownerUsername":"other","createdAt":"2026-04-24T10:00:00"}}',
+                encoding="utf-8",
+            )
+
+            with patch("conferir_ponto.web.REPORTS_DIR", reports_dir):
+                response = client.get("/api/reports/recent")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 1)
+        self.assertEqual(response.json()["items"][0]["reportId"], "viewer-report")
+
     def test_export_endpoint_falls_back_to_persisted_report(self):
         client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
         with TemporaryDirectory() as temp_dir:
             reports_dir = Path(temp_dir)
             report_id = "persisted-report"
             reports_dir.joinpath("reports", report_id).mkdir(parents=True)
             reports_dir.joinpath("reports", report_id, "metadata.json").write_text(
-                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report","filename":"persisted.pdf","createdAt":"2026-04-23T10:00:00","summary":{"balance":"00:00","inconsistencyCount":0,"paidOvertime":"00:00","businessDaysProcessed":1},"diagnostics":{}},"payload":{"reportId":"persisted-report","employeeName":"Persistido"}}',
+                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report","filename":"persisted.pdf","createdAt":"2026-04-23T10:00:00","ownerUsername":"viewer","summary":{"balance":"00:00","inconsistencyCount":0,"paidOvertime":"00:00","businessDaysProcessed":1},"diagnostics":{}},"payload":{"reportId":"persisted-report","employeeName":"Persistido","meta":{"owner":{"username":"viewer","role":"user"}}}}',
                 encoding="utf-8",
             )
             reports_dir.joinpath("reports", report_id, "export.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
@@ -523,12 +611,13 @@ class WebAppTests(unittest.TestCase):
 
     def test_report_details_endpoint_returns_persisted_payload(self):
         client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
         with TemporaryDirectory() as temp_dir:
             reports_dir = Path(temp_dir)
             report_id = "persisted-report"
             reports_dir.joinpath("reports", report_id).mkdir(parents=True)
             reports_dir.joinpath("reports", report_id, "metadata.json").write_text(
-                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report"},"payload":{"reportId":"persisted-report","employeeName":"Persistido","summary":{"businessDaysProcessed":3}}}',
+                '{"reportId":"persisted-report","filename":"persisted.pdf","recent":{"reportId":"persisted-report","ownerUsername":"viewer"},"payload":{"reportId":"persisted-report","employeeName":"Persistido","summary":{"businessDaysProcessed":3},"meta":{"owner":{"username":"viewer","role":"user"}}}}',
                 encoding="utf-8",
             )
             reports_dir.joinpath("reports", report_id, "export.pdf").write_bytes(b"%PDF-1.4\npersisted\n")
@@ -542,13 +631,33 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(payload["employeeName"], "Persistido")
         self.assertEqual(payload["summary"]["businessDaysProcessed"], 3)
 
+    def test_report_details_forbids_access_to_other_user_report(self):
+        client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
+        REPORTS["foreign-report"] = {
+            "filename": "foreign.pdf",
+            "pdf": b"%PDF-1.4\ncached\n",
+            "recent": {"reportId": "foreign-report", "ownerUsername": "other"},
+            "payload": {
+                "reportId": "foreign-report",
+                "employeeName": "Outro",
+                "meta": {"owner": {"username": "other", "role": "user"}},
+            },
+        }
+
+        response = client.get("/api/reports/foreign-report")
+
+        self.assertEqual(response.status_code, 403)
+
     def test_report_cache_discards_oldest_entry_when_limit_is_reached(self):
         client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
         for index in range(32):
             REPORTS[f"existing-{index}"] = {
                 "filename": f"report-{index}.pdf",
                 "pdf": b"%PDF-1.4\ncached\n",
                 "recent": {"reportId": f"existing-{index}"},
+                "payload": {"meta": {"owner": {"username": "viewer", "role": "user"}}},
             }
 
         fake_payload = {
@@ -577,6 +686,7 @@ class WebAppTests(unittest.TestCase):
 
     def test_process_endpoint_persists_report_files(self):
         client = TestClient(app)
+        self.login_app(client, username="viewer", password="senha123")
         fake_payload = {
             "employeeName": "Teste",
             "periodStart": "2026-04-01",
@@ -608,7 +718,7 @@ class WebAppTests(unittest.TestCase):
             self.assertIn('"payload"', persisted_metadata.read_text(encoding="utf-8"))
             self.assertIn(response_payload["reportId"], persisted_metadata.read_text(encoding="utf-8"))
 
-    def test_process_endpoint_attributes_report_to_authenticated_admin(self):
+    def test_process_endpoint_attributes_report_to_authenticated_user(self):
         client = TestClient(app)
         fake_payload = {
             "employeeName": "Teste",
@@ -622,12 +732,18 @@ class WebAppTests(unittest.TestCase):
             "days": [],
         }
 
-        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch(
+        create_user(
+            username="analista",
+            password_hash=hash_password("senha123"),
+            role="admin",
+            display_name="Analista",
+        )
+        with patch(
             "conferir_ponto.web.parse_timecard_bytes", return_value=object()
         ), patch("conferir_ponto.web.build_summary_payload", return_value=fake_payload), patch(
             "conferir_ponto.web.export_analysis_to_pdf", return_value=b"%PDF-1.4\nowner\n"
         ):
-            self.login_admin(client)
+            client.post("/api/session", json={"username": "analista", "password": "senha123"})
             response = client.post(
                 "/api/process",
                 files={"file": ("owner.pdf", b"%PDF-1.4\nfake\n", "application/pdf")},
@@ -635,9 +751,9 @@ class WebAppTests(unittest.TestCase):
             recent_response = client.get("/api/reports/recent")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["meta"]["owner"]["username"], "admin")
+        self.assertEqual(response.json()["meta"]["owner"]["username"], "analista")
         self.assertEqual(recent_response.status_code, 200)
-        self.assertEqual(recent_response.json()["items"][0]["ownerUsername"], "admin")
+        self.assertEqual(recent_response.json()["items"][0]["ownerUsername"], "analista")
 
 
 class WebHelpersTests(unittest.TestCase):

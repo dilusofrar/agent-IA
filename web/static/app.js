@@ -18,6 +18,9 @@
   const daysTable = document.getElementById("days-table");
   const exportLink = document.getElementById("export-link");
   const healthPill = document.getElementById("health-pill");
+  const sessionPill = document.getElementById("session-pill");
+  const sessionLabel = document.getElementById("session-label");
+  const logoutBtn = document.getElementById("logout-btn");
   const yearEl = document.getElementById("year");
   const recentList = document.getElementById("recent-list");
   const recentCount = document.getElementById("recent-count");
@@ -74,8 +77,13 @@
   }
 
   checkHealth();
+  fetchSession();
   fetchSettings();
   fetchRecentReports();
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", logoutSession);
+  }
 
   if (dropzone && fileInput) {
     ["dragenter", "dragover"].forEach(function (eventName) {
@@ -156,6 +164,10 @@
 
       try {
         const response = await fetch("/api/process", { method: "POST", body: formData });
+        if (response.status === 401) {
+          redirectToLogin();
+          return;
+        }
         const payload = await response.json();
         if (!response.ok) {
           throw new Error(payload.detail || "Erro ao processar o arquivo.");
@@ -196,6 +208,10 @@
 
     try {
       const response = await fetch("/api/reports/recent", { method: "GET" });
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
       if (!response.ok) {
         throw new Error("Falha ao carregar histórico");
       }
@@ -222,6 +238,23 @@
     }
   }
 
+  async function fetchSession() {
+    try {
+      const response = await fetch("/api/session", { method: "GET" });
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      if (!response.ok) {
+        throw new Error("Falha ao carregar sessão");
+      }
+      const payload = await response.json();
+      renderSession(payload && payload.user ? payload.user : null);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   function setHealth(online, label) {
     if (!healthPill) return;
     healthPill.replaceChildren();
@@ -232,6 +265,33 @@
       dot.style.boxShadow = "0 0 0 3px rgba(220,38,38,.18)";
     }
     healthPill.append(dot, document.createTextNode(label));
+  }
+
+  function renderSession(user) {
+    if (sessionPill && sessionLabel) {
+      if (user) {
+        sessionPill.hidden = false;
+        sessionLabel.textContent = (user.displayName || user.username || "Sessão ativa") + " · " + (user.role || "user");
+      } else {
+        sessionPill.hidden = true;
+      }
+    }
+    if (logoutBtn) {
+      logoutBtn.hidden = !user;
+    }
+  }
+
+  async function logoutSession() {
+    try {
+      await fetch("/api/session", { method: "DELETE" });
+    } catch (error) {
+      console.error(error);
+    }
+    redirectToLogin();
+  }
+
+  function redirectToLogin() {
+    window.location.replace("/login");
   }
 
   function setSubmitState(isBusy) {
@@ -585,6 +645,10 @@
     setStatus("loading", "Carregando apuração salva…");
     try {
       const response = await fetch("/api/reports/" + encodeURIComponent(reportId), { method: "GET" });
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.detail || "Não foi possível reabrir o relatório.");

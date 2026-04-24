@@ -54,9 +54,11 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.13.0"
+APP_VERSION = "1.14.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
+APP_SESSION_COOKIE = "agent_app_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
+APP_SESSION_TTL_SECONDS = 60 * 60 * 12
 PASSWORD_HASH_ITERATIONS = 390000
 SAFE_DOWNLOAD_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 ENABLE_API_DOCS = os.getenv("ENABLE_API_DOCS", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -101,8 +103,17 @@ async def apply_security_headers(request: Request, call_next) -> Response:
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index() -> HTMLResponse:
+async def index(request: Request) -> Response:
+    if not is_app_authenticated(request):
+        return RedirectResponse(url="/login", status_code=303)
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request) -> Response:
+    if is_app_authenticated(request):
+        return RedirectResponse(url="/", status_code=303)
+    return HTMLResponse((STATIC_DIR / "login.html").read_text(encoding="utf-8"))
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -129,6 +140,49 @@ async def healthcheck() -> JSONResponse:
             "persistenceBackend": persistence_backend_name(),
         }
     )
+
+
+@app.get("/api/session")
+async def app_session_status(request: Request) -> JSONResponse:
+    current_user = get_authenticated_app_user(request)
+    return JSONResponse(
+        {
+            "authenticated": current_user is not None,
+            "user": sanitize_user(current_user) if current_user else None,
+        }
+    )
+
+
+@app.post("/api/session")
+async def app_session_login(request: Request, payload: dict[str, Any]) -> JSONResponse:
+    provided_username = str(payload.get("username", "")).strip()
+    provided_password = str(payload.get("password", ""))
+    app_user = authenticate_app_user(provided_username, provided_password)
+    if app_user is None:
+        raise HTTPException(status_code=401, detail="Credenciais invalidas.")
+
+    response = JSONResponse({"authenticated": True, "user": sanitize_user(app_user)})
+    response.set_cookie(
+        key=APP_SESSION_COOKIE,
+        value=create_app_session_token(app_user["username"]),
+        httponly=True,
+        samesite="lax",
+        max_age=APP_SESSION_TTL_SECONDS,
+        secure=should_set_secure_cookie(request),
+    )
+    return response
+
+
+@app.delete("/api/session")
+async def app_session_logout(request: Request) -> JSONResponse:
+    response = JSONResponse({"authenticated": False})
+    response.delete_cookie(
+        APP_SESSION_COOKIE,
+        httponly=True,
+        samesite="lax",
+        secure=should_set_secure_cookie(request),
+    )
+    return response
 
 
 @app.get("/api/admin/session")
@@ -249,7 +303,8 @@ async def admin_update_user(username: str, request: Request, payload: dict[str, 
 
 @app.get("/api/reports/recent")
 async def recent_reports(request: Request) -> JSONResponse:
-    items = load_recent_report_items(limit=RECENT_REPORTS_LIMIT)
+    current_user = ensure_app_user(request)
+    items = load_recent_report_items(limit=RECENT_REPORTS_LIMIT, current_user=current_user)
     return JSONResponse({"items": items, "count": len(items)})
 
 
@@ -289,17 +344,20 @@ async def update_settings(request: Request, payload: dict[str, Any]) -> JSONResp
 
 
 @app.get("/api/reports/{report_id}")
-async def report_details(report_id: str) -> JSONResponse:
+async def report_details(report_id: str, request: Request) -> JSONResponse:
+    current_user = ensure_app_user(request)
     report = REPORTS.get(report_id)
     if report is None:
         report = load_report_from_disk(report_id)
     if report is None or "payload" not in report:
         raise HTTPException(status_code=404, detail="Relatorio nao encontrado.")
+    ensure_report_access(current_user, report)
     return JSONResponse(report["payload"])
 
 
 @app.post("/api/process")
 async def process_pdf(request: Request, file: UploadFile = File(...)) -> JSONResponse:
+    current_user = ensure_app_user(request)
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Envie um arquivo PDF valido.")
 
@@ -342,9 +400,7 @@ async def process_pdf(request: Request, file: UploadFile = File(...)) -> JSONRes
         "processingDurationMs": processing_duration_ms,
         "version": APP_VERSION,
     }
-    owner = get_authenticated_admin_user(request)
-    if owner is not None:
-        payload["meta"]["owner"] = sanitize_user(owner)
+    payload["meta"]["owner"] = sanitize_user(current_user)
     while len(REPORTS) >= MAX_STORED_REPORTS:
         REPORTS.popitem(last=False)
     REPORTS[report_id] = {
@@ -371,12 +427,14 @@ async def process_pdf(request: Request, file: UploadFile = File(...)) -> JSONRes
 
 
 @app.get("/api/export/{report_id}")
-async def export_report(report_id: str) -> Response:
+async def export_report(report_id: str, request: Request) -> Response:
+    current_user = ensure_app_user(request)
     report = REPORTS.get(report_id)
     if report is None:
         report = load_report_from_disk(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Relatorio nao encontrado.")
+    ensure_report_access(current_user, report)
 
     original_name = sanitize_download_name(report["filename"])
     return Response(
@@ -481,6 +539,14 @@ def authenticate_admin_user(username: str, password: str) -> dict[str, Any] | No
     return None
 
 
+def authenticate_app_user(username: str, password: str) -> dict[str, Any] | None:
+    sync_admin_user_from_env()
+    user = load_user_by_username(username)
+    if user and user.get("isActive") and verify_password(password, user.get("passwordHash")):
+        return user
+    return None
+
+
 def get_authenticated_admin_user(request: Request) -> dict[str, Any] | None:
     if not is_admin_authenticated(request):
         return None
@@ -509,6 +575,22 @@ def get_authenticated_admin_user(request: Request) -> dict[str, Any] | None:
     return None
 
 
+def get_authenticated_app_user(request: Request) -> dict[str, Any] | None:
+    if not is_app_authenticated(request):
+        return None
+    token = request.cookies.get(APP_SESSION_COOKIE, "")
+    if not token:
+        return None
+    try:
+        token_username, _, _ = token.split(":", 2)
+    except ValueError:
+        return None
+    user = load_user_by_username(token_username)
+    if user and user.get("isActive"):
+        return user
+    return None
+
+
 def admin_session_secret() -> str:
     configured_secret = os.getenv("ADMIN_SESSION_SECRET", "").strip()
     if configured_secret:
@@ -523,6 +605,29 @@ def create_admin_session_token(username: str) -> str:
     payload = f"{username}:{expires_at}"
     signature = hmac.new(
         admin_session_secret().encode("utf-8"),
+        payload.encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def app_session_secret() -> str:
+    configured_secret = os.getenv("APP_SESSION_SECRET", "").strip()
+    if configured_secret:
+        return configured_secret
+    fallback_secret = os.getenv("ADMIN_SESSION_SECRET", "").strip()
+    if fallback_secret:
+        return sha256(f"app:{fallback_secret}".encode("utf-8")).hexdigest()
+    username, password = get_admin_credentials()
+    return sha256(f"{username}:{password}:agent-ia-ponto-app".encode("utf-8")).hexdigest()
+
+
+def create_app_session_token(username: str) -> str:
+    issued_at = int(datetime.now().timestamp())
+    expires_at = issued_at + APP_SESSION_TTL_SECONDS
+    payload = f"{username}:{expires_at}"
+    signature = hmac.new(
+        app_session_secret().encode("utf-8"),
         payload.encode("utf-8"),
         sha256,
     ).hexdigest()
@@ -559,9 +664,39 @@ def is_admin_authenticated(request: Request) -> bool:
     return False
 
 
+def is_app_authenticated(request: Request) -> bool:
+    token = request.cookies.get(APP_SESSION_COOKIE, "")
+    if not token:
+        return False
+    try:
+        token_username, token_expires, token_signature = token.split(":", 2)
+        expires_at = int(token_expires)
+    except ValueError:
+        return False
+    payload = f"{token_username}:{expires_at}"
+    expected_signature = hmac.new(
+        app_session_secret().encode("utf-8"),
+        payload.encode("utf-8"),
+        sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(token_signature, expected_signature):
+        return False
+    if expires_at < int(datetime.now().timestamp()):
+        return False
+    user = load_user_by_username(token_username)
+    return bool(user and user.get("isActive"))
+
+
 def ensure_admin(request: Request) -> None:
     if not is_admin_authenticated(request):
         raise HTTPException(status_code=401, detail="Autenticacao administrativa necessaria.")
+
+
+def ensure_app_user(request: Request) -> dict[str, Any]:
+    user = get_authenticated_app_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Autenticacao necessaria.")
+    return user
 
 
 def get_authenticated_admin_username(request: Request) -> str:
@@ -606,6 +741,31 @@ def build_recent_report_item(report_id: str, filename: str, payload: dict[str, A
         },
         "diagnostics": payload.get("diagnostics", {}),
     }
+
+
+def can_access_report(user: dict[str, Any], report: dict[str, Any] | None) -> bool:
+    if not user or report is None:
+        return False
+    if user.get("role") == "admin":
+        return True
+    owner = report.get("payload", {}).get("meta", {}).get("owner", {})
+    owner_username = owner.get("username") or report.get("ownerUsername")
+    return bool(owner_username and owner_username == user.get("username"))
+
+
+def ensure_report_access(user: dict[str, Any], report: dict[str, Any] | None) -> None:
+    if not can_access_report(user, report):
+        raise HTTPException(status_code=403, detail="Acesso negado para este relatorio.")
+
+
+def filter_recent_items_for_user(
+    items: list[dict[str, Any]],
+    current_user: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if current_user is None or current_user.get("role") == "admin":
+        return items
+    username = current_user.get("username")
+    return [item for item in items if item.get("ownerUsername") == username]
 
 
 def ensure_reports_dir() -> Path:
@@ -695,7 +855,11 @@ def load_report_from_disk(report_id: str) -> dict[str, Any] | None:
     return report
 
 
-def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str, Any]]:
+def load_recent_report_items(
+    limit: int = RECENT_REPORTS_LIMIT,
+    *,
+    current_user: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     seen_report_ids: set[str] = set()
     db_items = list_recent_report_records(limit)
@@ -737,7 +901,7 @@ def load_recent_report_items(limit: int = RECENT_REPORTS_LIMIT) -> list[dict[str
             break
 
     items.sort(key=lambda item: item.get("createdAt") or item.get("processedAt") or "", reverse=True)
-    return items[:limit]
+    return filter_recent_items_for_user(items[:limit], current_user)
 
 
 def prune_persisted_reports() -> None:
