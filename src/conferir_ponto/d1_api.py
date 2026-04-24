@@ -63,8 +63,8 @@ class D1ApiClient:
             {"batch": [{"sql": statement} for statement in statements]},
         )
 
-    def ensure_schema(self) -> None:
-        if self._schema_ensured or not D1_SCHEMA_PATH.exists():
+    def ensure_schema(self, *, force: bool = False) -> None:
+        if (self._schema_ensured and not force) or not D1_SCHEMA_PATH.exists():
             return
         self.execute_script(D1_SCHEMA_PATH.read_text(encoding="utf-8"))
         self._schema_ensured = True

@@ -156,37 +156,69 @@ def d1_status() -> dict[str, Any]:
     }
 
 
-def mirror_execute(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> None:
+def _is_missing_d1_table_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "no such table" in message and "sqlite_error" in message
+
+
+def _retry_d1_with_schema(
+    operation_name: str,
+    sql: str,
+    callback,
+):
     client = d1_client()
     if client is None:
-        return
+        return None
     try:
-        client.execute(sql, list(params))
+        return callback(client)
+    except Exception as exc:
+        if not _is_missing_d1_table_error(exc):
+            raise
+        LOGGER.warning(
+            "d1_schema_retry_after_missing_table",
+            extra={"error": str(exc), "sql": sql, "operation": operation_name},
+        )
+        client.ensure_schema(force=True)
+        return callback(client)
+
+
+def mirror_execute(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> None:
+    try:
+        _retry_d1_with_schema(
+            "execute",
+            sql,
+            lambda client: client.execute(sql, list(params)),
+        )
     except Exception as exc:
         LOGGER.warning("d1_mirror_execute_failed", extra={"error": str(exc), "sql": sql})
 
 
 def mirror_fetch_one(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> dict[str, Any] | None:
-    client = d1_client()
-    if client is None:
-        return None
     try:
-        rows = client.query(sql, list(params))
+        rows = _retry_d1_with_schema(
+            "fetch_one",
+            sql,
+            lambda client: client.query(sql, list(params)),
+        )
     except Exception as exc:
         LOGGER.warning("d1_mirror_fetch_failed", extra={"error": str(exc), "sql": sql})
+        return None
+    if rows is None:
         return None
     return rows[0] if rows else None
 
 
 def mirror_fetch_all(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list[dict[str, Any]]:
-    client = d1_client()
-    if client is None:
-        return []
     try:
-        return client.query(sql, list(params))
+        rows = _retry_d1_with_schema(
+            "fetch_all",
+            sql,
+            lambda client: client.query(sql, list(params)),
+        )
     except Exception as exc:
         LOGGER.warning("d1_mirror_fetch_failed", extra={"error": str(exc), "sql": sql})
         return []
+    return rows or []
 
 
 def sync_local_state_to_d1() -> dict[str, int]:

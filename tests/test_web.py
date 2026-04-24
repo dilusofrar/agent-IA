@@ -292,6 +292,43 @@ class WebAppTests(unittest.TestCase):
         self.assertTrue(all(item["targetUsername"] == "operador" for item in payload["items"]))
         self.assertEqual({item["action"] for item in payload["items"]}, {"create", "update"})
 
+    def test_user_audit_history_recovers_after_d1_missing_table(self):
+        class FakeD1Client:
+            def __init__(self):
+                self.query_calls = 0
+                self.ensure_calls = 0
+
+            def query(self, sql, params):
+                self.query_calls += 1
+                if self.query_calls == 1:
+                    raise RuntimeError(
+                        'D1 HTTP error 400: {"messages":[],"result":[],"success":false,'
+                        '"errors":[{"code":7500,"message":"no such table: user_audit: SQLITE_ERROR"}]}'
+                    )
+                return [
+                    {
+                        "changed_at": "2026-04-24T12:00:00",
+                        "actor": "admin",
+                        "target_username": "operador",
+                        "action": "update",
+                        "changes_json": '["Perfil alterado para admin"]',
+                    }
+                ]
+
+            def ensure_schema(self, *, force=False):
+                self.ensure_calls += 1
+
+        fake_d1 = FakeD1Client()
+        persistence_module._D1_CLIENT = fake_d1
+
+        with patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+            items = persistence_module.list_user_audit_entries()
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["targetUsername"], "operador")
+        self.assertEqual(fake_d1.ensure_calls, 1)
+        self.assertEqual(fake_d1.query_calls, 2)
+
     def test_admin_can_update_existing_user(self):
         client = TestClient(app)
 
@@ -350,7 +387,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.14.0")
+        self.assertEqual(response.json()["version"], "1.14.1")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
