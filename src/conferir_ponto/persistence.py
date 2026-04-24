@@ -197,6 +197,37 @@ def _prefer_newer_user_record(local_user: dict[str, Any] | None, d1_user: dict[s
     return d1_user, local_user
 
 
+def _mirror_user_record(user: dict[str, Any]) -> None:
+    if not user:
+        return
+    mirror_execute(
+        """
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+            email = excluded.email,
+            display_name = excluded.display_name,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            is_active = excluded.is_active,
+            updated_at = excluded.updated_at
+        """,
+        (
+            user.get("id"),
+            user.get("username"),
+            user.get("email"),
+            user.get("displayName"),
+            user.get("passwordHash"),
+            user.get("role"),
+            1 if user.get("isActive") else 0,
+            user.get("createdAt"),
+            user.get("updatedAt"),
+        ),
+    )
+
+
 def _retry_d1_with_schema(
     operation_name: str,
     sql: str,
@@ -960,6 +991,8 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
             (normalized_username,),
         )
         d1_user = _row_to_user(selected_row) if selected_row is not None else None
+    if local_user is not None and d1_user is None and d1_client() is not None:
+        _mirror_user_record(local_user)
     primary_user, fallback_user = (
         _prefer_newer_user_record(local_user, d1_user)
         if prefer_d1_reads()
@@ -969,76 +1002,8 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
 
 
 def list_users(limit: int = 100) -> list[dict[str, Any]]:
-    if d1_client() is not None and prefer_d1_reads():
-        selected_rows = mirror_fetch_all(
-            """
-            SELECT id, username, email, display_name, role, is_active, created_at, updated_at
-            FROM users
-            ORDER BY created_at ASC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        )
-        if selected_rows:
-            return [
-                {
-                    "id": row["id"],
-                    "username": row["username"],
-                    "email": row["email"],
-                    "displayName": row["display_name"],
-                    "role": row["role"],
-                    "isActive": bool(row["is_active"]),
-                    "createdAt": row["created_at"],
-                    "updatedAt": row["updated_at"],
-                }
-                for row in selected_rows
-            ]
-    if not APP_DB_PATH.exists():
-        selected_rows = mirror_fetch_all(
-            """
-            SELECT id, username, email, display_name, role, is_active, created_at, updated_at
-            FROM users
-            ORDER BY created_at ASC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        )
-        return [
-            {
-                "id": row["id"],
-                "username": row["username"],
-                "email": row["email"],
-                "displayName": row["display_name"],
-                "role": row["role"],
-                "isActive": bool(row["is_active"]),
-                "createdAt": row["created_at"],
-                "updatedAt": row["updated_at"],
-            }
-            for row in selected_rows
-        ]
-    with open_db() as connection:
-        rows = connection.execute(
-            """
-            SELECT id, username, email, display_name, role, is_active, created_at, updated_at
-            FROM users
-            ORDER BY created_at ASC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        ).fetchall()
-    selected_rows: Any = rows
-    if not selected_rows:
-        selected_rows = mirror_fetch_all(
-            """
-            SELECT id, username, email, display_name, role, is_active, created_at, updated_at
-            FROM users
-            ORDER BY created_at ASC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        )
-    return [
-        {
+    def normalize_row(row: Any) -> dict[str, Any]:
+        return {
             "id": row["id"],
             "username": row["username"],
             "email": row["email"],
@@ -1048,8 +1013,54 @@ def list_users(limit: int = 100) -> list[dict[str, Any]]:
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
-        for row in selected_rows
+
+    query = """
+        SELECT id, username, email, display_name, role, is_active, created_at, updated_at
+        FROM users
+        ORDER BY created_at ASC
+        LIMIT ?
+    """
+    effective_limit = max(1, int(limit))
+    d1_users = [
+        normalize_row(row)
+        for row in mirror_fetch_all(query, (effective_limit,))
     ]
+    if not APP_DB_PATH.exists():
+        return d1_users
+
+    with open_db() as connection:
+        local_rows = connection.execute(query, (effective_limit,)).fetchall()
+    local_users = [normalize_row(row) for row in local_rows]
+
+    if not local_users:
+        return d1_users
+    if not d1_users:
+        for user in local_users:
+            full_user = load_user_by_username(user["username"])
+            if full_user is not None:
+                _mirror_user_record(full_user)
+        return local_users
+
+    d1_by_username = {user["username"]: user for user in d1_users}
+    merged_users: list[dict[str, Any]] = []
+    for local_user in local_users:
+        d1_user = d1_by_username.pop(local_user["username"], None)
+        if d1_user is None:
+            full_user = load_user_by_username(local_user["username"])
+            if full_user is not None:
+                _mirror_user_record(full_user)
+            merged_users.append(local_user)
+            continue
+        primary_user, fallback_user = (
+            _prefer_newer_user_record(local_user, d1_user)
+            if prefer_d1_reads()
+            else (local_user, d1_user)
+        )
+        merged_users.append(_merge_user_records(primary_user, fallback_user) or local_user)
+
+    merged_users.extend(d1_by_username.values())
+    merged_users.sort(key=lambda item: str(item.get("createdAt") or ""))
+    return merged_users[:effective_limit]
 
 
 def append_user_audit_entry(

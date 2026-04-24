@@ -429,6 +429,44 @@ class WebAppTests(unittest.TestCase):
                 self.assertEqual(updated["displayName"], "Operador Atualizado")
                 self.assertTrue(web_module.verify_password("senha123", updated["passwordHash"]))
 
+    def test_load_user_backfills_d1_when_remote_record_is_missing(self):
+        with TemporaryDirectory() as temp_dir:
+            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
+                "conferir_ponto.persistence.mirror_execute"
+            ) as mocked_mirror_execute, patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+                create_user(
+                    username="operador",
+                    password_hash=hash_password("senha123"),
+                    role="user",
+                    display_name="Operador",
+                )
+                persistence_module._D1_CLIENT = SimpleNamespace()
+                with patch("conferir_ponto.persistence.mirror_fetch_one", return_value=None):
+                    user = persistence_module.load_user_by_username("operador")
+
+                self.assertEqual(user["username"], "operador")
+                self.assertTrue(mocked_mirror_execute.called)
+                self.assertIn("INSERT INTO users", mocked_mirror_execute.call_args.args[0])
+
+    def test_list_users_keeps_local_user_visible_when_d1_is_missing_it(self):
+        with TemporaryDirectory() as temp_dir:
+            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
+                "conferir_ponto.persistence.mirror_execute"
+            ) as mocked_mirror_execute, patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+                create_user(
+                    username="operador",
+                    password_hash=hash_password("senha123"),
+                    role="user",
+                    display_name="Operador",
+                )
+                persistence_module._D1_CLIENT = SimpleNamespace()
+                with patch("conferir_ponto.persistence.mirror_fetch_all", return_value=[]):
+                    items = persistence_module.list_users()
+
+                self.assertEqual(len(items), 1)
+                self.assertEqual(items[0]["username"], "operador")
+                self.assertTrue(mocked_mirror_execute.called)
+
     def test_admin_can_inspect_persistence_status(self):
         client = TestClient(app)
 
@@ -456,7 +494,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.15.0")
+        self.assertEqual(response.json()["version"], "1.15.1")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
