@@ -11,6 +11,7 @@
   const jsonPreview = document.getElementById("admin-settings-json");
   const usersCount = document.getElementById("admin-users-count");
   const usersList = document.getElementById("admin-users-list");
+  const userHistory = document.getElementById("admin-user-history");
   const userForm = document.getElementById("admin-user-form");
   const userFormTitle = document.getElementById("admin-user-form-title");
   const userStatus = document.getElementById("admin-user-status");
@@ -115,6 +116,7 @@
         throw new Error(payload.detail || "Falha ao carregar usuários.");
       }
       renderUsers(payload.items || []);
+      await loadUserHistory();
       setStatus(userStatus, "success", "Usuários carregados.");
     } catch (error) {
       if (error.message && /Autenticacao/.test(error.message)) {
@@ -217,6 +219,22 @@
       setStatus(userStatus, "success", mode === "create" ? "Usuário criado com sucesso." : "Usuário atualizado com sucesso.");
     } catch (error) {
       setStatus(userStatus, "error", error.message || "Falha ao salvar usuário.");
+    }
+  }
+
+  async function loadUserHistory() {
+    if (!userHistory) {
+      return;
+    }
+    try {
+      const response = await fetch("/api/admin/users/history", { method: "GET" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Falha ao carregar auditoria de usuários.");
+      }
+      renderUserHistory(payload.items || []);
+    } catch (error) {
+      renderUserHistory([]);
     }
   }
 
@@ -452,6 +470,42 @@
     if (persistenceJson) {
       persistenceJson.textContent = JSON.stringify(status, null, 2);
     }
+  }
+
+  function renderUserHistory(items) {
+    if (!userHistory) {
+      return;
+    }
+
+    if (!Array.isArray(items) || !items.length) {
+      userHistory.replaceChildren(
+        createElement("div", {
+          className: "admin-history-empty",
+          text: "Nenhuma alteração de usuário registrada ainda.",
+        }),
+      );
+      return;
+    }
+
+    userHistory.replaceChildren.apply(
+      userHistory,
+      items.map(function (item) {
+        const entry = document.createElement("article");
+        entry.className = "admin-history-item";
+        entry.append(
+          createElement("div", {
+            className: "admin-history-meta",
+            text: (item.actor || "admin") + " · " + formatDateTime(item.changedAt),
+          }),
+          createElement("strong", {
+            className: "admin-history-title",
+            text: (item.action === "create" ? "Criação" : "Atualização") + " · " + item.targetUsername,
+          }),
+          createHistoryChanges(item.changes || []),
+        );
+        return entry;
+      }),
+    );
   }
 
   function summaryCard(label, value, note) {

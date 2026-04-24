@@ -263,6 +263,35 @@ class WebAppTests(unittest.TestCase):
         self.assertGreaterEqual(list_response.json()["count"], 2)
         self.assertIn("operador", [item["username"] for item in list_response.json()["items"]])
 
+    def test_admin_user_history_lists_create_and_update_actions(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            client.post(
+                "/api/admin/users",
+                json={
+                    "username": "operador",
+                    "password": "senha123",
+                    "role": "user",
+                    "displayName": "Operador",
+                },
+            )
+            client.put(
+                "/api/admin/users/operador",
+                json={
+                    "role": "admin",
+                    "displayName": "Operador Lider",
+                },
+            )
+            history_response = client.get("/api/admin/users/history")
+
+        self.assertEqual(history_response.status_code, 200)
+        payload = history_response.json()
+        self.assertEqual(payload["count"], 2)
+        self.assertTrue(all(item["targetUsername"] == "operador" for item in payload["items"]))
+        self.assertEqual({item["action"] for item in payload["items"]}, {"create", "update"})
+
     def test_admin_can_update_existing_user(self):
         client = TestClient(app)
 

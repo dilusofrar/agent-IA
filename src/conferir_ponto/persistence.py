@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    changed_at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    target_username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    changes_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_audit_changed_at
+    ON user_audit(changed_at DESC);
 """
 
 
@@ -182,13 +194,14 @@ def sync_local_state_to_d1() -> dict[str, int]:
     if client is None:
         raise RuntimeError("D1 não configurado.")
     ensure_app_db()
-    summary = {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0}
+    summary = {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0, "userAudit": 0}
     client.execute_script(
         """
         DELETE FROM settings_current;
         DELETE FROM settings_audit;
         DELETE FROM reports;
         DELETE FROM users;
+        DELETE FROM user_audit;
         """
     )
     with open_db() as connection:
@@ -286,6 +299,29 @@ def sync_local_state_to_d1() -> dict[str, int]:
                 ],
             )
             summary["users"] += 1
+
+        user_audit_rows = connection.execute(
+            """
+            SELECT changed_at, actor, target_username, action, changes_json
+            FROM user_audit
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        for row in user_audit_rows:
+            client.execute(
+                """
+                INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    row["changed_at"],
+                    row["actor"],
+                    row["target_username"],
+                    row["action"],
+                    row["changes_json"],
+                ],
+            )
+            summary["userAudit"] += 1
     return summary
 
 
@@ -968,6 +1004,93 @@ def list_users(limit: int = 100) -> list[dict[str, Any]]:
         }
         for row in selected_rows
     ]
+
+
+def append_user_audit_entry(
+    *,
+    actor: str,
+    target_username: str,
+    action: str,
+    changes: list[str],
+) -> None:
+    changed_at = datetime.now().isoformat(timespec="seconds")
+    changes_json = json.dumps(changes, ensure_ascii=False)
+    with open_db() as connection:
+        connection.execute(
+            """
+            INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (changed_at, actor, target_username, action, changes_json),
+        )
+    mirror_execute(
+        """
+        INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (changed_at, actor, target_username, action, changes_json),
+    )
+
+
+def list_user_audit_entries(limit: int = 20) -> list[dict[str, Any]]:
+    def normalize(rows: list[Any]) -> list[dict[str, Any]]:
+        return [
+            {
+                "changedAt": row["changed_at"],
+                "actor": row["actor"],
+                "targetUsername": row["target_username"],
+                "action": row["action"],
+                "changes": json.loads(row["changes_json"]),
+            }
+            for row in rows
+        ]
+
+    if d1_client() is not None and prefer_d1_reads():
+        selected_rows = mirror_fetch_all(
+            """
+            SELECT changed_at, actor, target_username, action, changes_json
+            FROM user_audit
+            ORDER BY changed_at DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        )
+        if selected_rows:
+            return normalize(selected_rows)
+    if not APP_DB_PATH.exists():
+        return normalize(
+            mirror_fetch_all(
+                """
+                SELECT changed_at, actor, target_username, action, changes_json
+                FROM user_audit
+                ORDER BY changed_at DESC
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            )
+        )
+    with open_db() as connection:
+        rows = connection.execute(
+            """
+            SELECT changed_at, actor, target_username, action, changes_json
+            FROM user_audit
+            ORDER BY changed_at DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        ).fetchall()
+    selected_rows: Any = rows
+    if not selected_rows:
+        selected_rows = mirror_fetch_all(
+            """
+            SELECT changed_at, actor, target_username, action, changes_json
+            FROM user_audit
+            ORDER BY changed_at DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit)),),
+        )
+    return normalize(selected_rows)
 
 
 def create_user(

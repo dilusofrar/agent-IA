@@ -48,3 +48,12 @@ CREATE TABLE users (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE user_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    changed_at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    target_username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    changes_json TEXT NOT NULL
+);

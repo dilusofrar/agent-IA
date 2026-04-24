@@ -19,9 +19,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from conferir_ponto.persistence import (
+    append_user_audit_entry,
     create_user,
     delete_report_record,
     d1_status,
+    list_user_audit_entries,
     list_users,
     list_recent_report_records,
     load_report_record,
@@ -245,6 +247,13 @@ async def admin_list_users(request: Request) -> JSONResponse:
     return JSONResponse({"items": items, "count": len(items)})
 
 
+@app.get("/api/admin/users/history")
+async def admin_user_history(request: Request) -> JSONResponse:
+    ensure_admin(request)
+    items = list_user_audit_entries()
+    return JSONResponse({"items": items, "count": len(items)})
+
+
 @app.get("/api/admin/persistence")
 async def admin_persistence_status(request: Request) -> JSONResponse:
     ensure_admin(request)
@@ -282,12 +291,24 @@ async def admin_create_user(request: Request, payload: dict[str, Any]) -> JSONRe
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    append_user_audit_entry(
+        actor=get_authenticated_admin_username(request),
+        target_username=user["username"],
+        action="create",
+        changes=[
+            f"Usuário {user['username']} criado com perfil {user['role']}.",
+            f"Status inicial: {'ativo' if user['isActive'] else 'inativo'}.",
+        ],
+    )
     return JSONResponse(sanitize_user(user), status_code=201)
 
 
 @app.put("/api/admin/users/{username}")
 async def admin_update_user(username: str, request: Request, payload: dict[str, Any]) -> JSONResponse:
     ensure_admin(request)
+    previous_user = load_user_by_username(username)
+    if previous_user is None:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
     role = payload.get("role")
     normalized_role = str(role).strip().lower() if role is not None else None
     if normalized_role is not None and normalized_role not in {"admin", "user"}:
@@ -310,6 +331,13 @@ async def admin_update_user(username: str, request: Request, payload: dict[str, 
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    changes = build_user_change_summary(previous_user, user, password_changed=bool(password))
+    append_user_audit_entry(
+        actor=get_authenticated_admin_username(request),
+        target_username=user["username"],
+        action="update",
+        changes=changes,
+    )
     return JSONResponse(sanitize_user(user))
 
 
@@ -490,6 +518,32 @@ def sanitize_user(user: dict[str, Any]) -> dict[str, Any]:
         "createdAt": user.get("createdAt"),
         "updatedAt": user.get("updatedAt"),
     }
+
+
+def build_user_change_summary(
+    previous_user: dict[str, Any],
+    updated_user: dict[str, Any],
+    *,
+    password_changed: bool,
+) -> list[str]:
+    changes: list[str] = []
+    if previous_user.get("role") != updated_user.get("role"):
+        changes.append(f"Perfil alterado de {previous_user.get('role')} para {updated_user.get('role')}.")
+    if previous_user.get("displayName") != updated_user.get("displayName"):
+        changes.append(
+            "Nome de exibição alterado para "
+            + (updated_user.get("displayName") or "não informado")
+            + "."
+        )
+    if previous_user.get("email") != updated_user.get("email"):
+        changes.append("E-mail atualizado.")
+    if bool(previous_user.get("isActive")) != bool(updated_user.get("isActive")):
+        changes.append("Status alterado para " + ("ativo." if updated_user.get("isActive") else "inativo."))
+    if password_changed:
+        changes.append("Senha redefinida.")
+    if not changes:
+        changes.append("Registro salvo sem alteração material detectada.")
+    return changes
 
 
 def hash_password(password: str, *, salt: str | None = None) -> str:
