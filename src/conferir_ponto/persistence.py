@@ -161,6 +161,42 @@ def _is_missing_d1_table_error(exc: Exception) -> bool:
     return "no such table" in message and "sqlite_error" in message
 
 
+def _row_to_user(row: Any) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "email": row["email"],
+        "displayName": row["display_name"],
+        "passwordHash": row["password_hash"],
+        "role": row["role"],
+        "isActive": bool(row["is_active"]),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _merge_user_records(primary: dict[str, Any] | None, fallback: dict[str, Any] | None) -> dict[str, Any] | None:
+    if primary is None:
+        return fallback
+    if fallback is None:
+        return primary
+    merged = dict(primary)
+    for key in ("id", "email", "displayName", "passwordHash", "role", "createdAt", "updatedAt"):
+        if merged.get(key) in {None, ""} and fallback.get(key) not in {None, ""}:
+            merged[key] = fallback.get(key)
+    return merged
+
+
+def _prefer_newer_user_record(local_user: dict[str, Any] | None, d1_user: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if local_user is None or d1_user is None:
+        return local_user, d1_user
+    local_updated = str(local_user.get("updatedAt") or "")
+    d1_updated = str(d1_user.get("updatedAt") or "")
+    if local_updated and (not d1_updated or local_updated >= d1_updated):
+        return local_user, d1_user
+    return d1_user, local_user
+
+
 def _retry_d1_with_schema(
     operation_name: str,
     sql: str,
@@ -801,6 +837,7 @@ def update_user(
     existing = load_user_by_username(normalized_username)
     if existing is None:
         raise ValueError("Usuário não encontrado.")
+    effective_password_hash = password_hash if password_hash is not None else existing.get("passwordHash")
     now = datetime.now().isoformat(timespec="seconds")
     with open_db() as connection:
         connection.execute(
@@ -812,7 +849,7 @@ def update_user(
             (
                 email if email is not None else existing.get("email"),
                 display_name if display_name is not None else existing.get("displayName"),
-                password_hash if password_hash is not None else existing.get("passwordHash"),
+                effective_password_hash,
                 role if role is not None else existing.get("role"),
                 1 if (is_active if is_active is not None else existing.get("isActive")) else 0,
                 now,
@@ -838,7 +875,7 @@ def update_user(
             normalized_username,
             email if email is not None else existing.get("email"),
             display_name if display_name is not None else existing.get("displayName"),
-            password_hash if password_hash is not None else existing.get("passwordHash"),
+            effective_password_hash,
             role if role is not None else existing.get("role"),
             1 if (is_active if is_active is not None else existing.get("isActive")) else 0,
             existing.get("createdAt"),
@@ -877,6 +914,8 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
     normalized_username = str(username or "").strip()
     if not normalized_username:
         return None
+    local_user: dict[str, Any] | None = None
+    d1_user: dict[str, Any] | None = None
     if d1_client() is not None and prefer_d1_reads():
         selected_row = mirror_fetch_one(
             """
@@ -887,18 +926,10 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
             (normalized_username,),
         )
         if selected_row is not None:
-            return {
-                "id": selected_row["id"],
-                "username": selected_row["username"],
-                "email": selected_row["email"],
-                "displayName": selected_row["display_name"],
-                "passwordHash": selected_row["password_hash"],
-                "role": selected_row["role"],
-                "isActive": bool(selected_row["is_active"]),
-                "createdAt": selected_row["created_at"],
-                "updatedAt": selected_row["updated_at"],
-            }
+            d1_user = _row_to_user(selected_row)
     if not APP_DB_PATH.exists():
+        if d1_user is not None:
+            return d1_user
         selected_row = mirror_fetch_one(
             """
             SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
@@ -907,19 +938,7 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
             """,
             (normalized_username,),
         )
-        if selected_row is None:
-            return None
-        return {
-            "id": selected_row["id"],
-            "username": selected_row["username"],
-            "email": selected_row["email"],
-            "displayName": selected_row["display_name"],
-            "passwordHash": selected_row["password_hash"],
-            "role": selected_row["role"],
-            "isActive": bool(selected_row["is_active"]),
-            "createdAt": selected_row["created_at"],
-            "updatedAt": selected_row["updated_at"],
-        }
+        return _row_to_user(selected_row) if selected_row is not None else None
     with open_db() as connection:
         row = connection.execute(
             """
@@ -929,8 +948,9 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
             """,
             (normalized_username,),
         ).fetchone()
-    selected_row: Any = row
-    if selected_row is None:
+    if row is not None:
+        local_user = _row_to_user(row)
+    if local_user is None and d1_user is None:
         selected_row = mirror_fetch_one(
             """
             SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
@@ -939,19 +959,13 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
             """,
             (normalized_username,),
         )
-    if selected_row is None:
-        return None
-    return {
-        "id": selected_row["id"],
-        "username": selected_row["username"],
-        "email": selected_row["email"],
-        "displayName": selected_row["display_name"],
-        "passwordHash": selected_row["password_hash"],
-        "role": selected_row["role"],
-        "isActive": bool(selected_row["is_active"]),
-        "createdAt": selected_row["created_at"],
-        "updatedAt": selected_row["updated_at"],
-    }
+        d1_user = _row_to_user(selected_row) if selected_row is not None else None
+    primary_user, fallback_user = (
+        _prefer_newer_user_record(local_user, d1_user)
+        if prefer_d1_reads()
+        else (local_user, d1_user)
+    )
+    return _merge_user_records(primary_user, fallback_user)
 
 
 def list_users(limit: int = 100) -> list[dict[str, Any]]:

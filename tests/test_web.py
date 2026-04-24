@@ -360,6 +360,39 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(updated_user["displayName"], "Operador Líder")
         self.assertFalse(updated_user["isActive"])
 
+    def test_update_user_preserves_password_when_d1_row_lacks_hash(self):
+        with TemporaryDirectory() as temp_dir:
+            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
+                "conferir_ponto.persistence.mirror_execute"
+            ), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+                create_user(
+                    username="operador",
+                    password_hash=hash_password("senha123"),
+                    role="user",
+                    display_name="Operador",
+                )
+                persistence_module._D1_CLIENT = SimpleNamespace()
+                remote_row = {
+                    "id": "remote-operador",
+                    "username": "operador",
+                    "email": "operador@empresa.com",
+                    "display_name": "Operador Remoto",
+                    "password_hash": None,
+                    "role": "user",
+                    "is_active": 1,
+                    "created_at": "2026-04-24T00:00:00",
+                    "updated_at": "2026-04-24T00:00:00",
+                }
+                with patch("conferir_ponto.persistence.mirror_fetch_one", return_value=remote_row):
+                    updated = persistence_module.update_user(
+                        "operador",
+                        display_name="Operador Atualizado",
+                        email="operador@empresa.com",
+                    )
+
+                self.assertEqual(updated["displayName"], "Operador Atualizado")
+                self.assertTrue(web_module.verify_password("senha123", updated["passwordHash"]))
+
     def test_admin_can_inspect_persistence_status(self):
         client = TestClient(app)
 
@@ -387,7 +420,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.14.1")
+        self.assertEqual(response.json()["version"], "1.14.2")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
