@@ -21,11 +21,13 @@ from fastapi.staticfiles import StaticFiles
 from conferir_ponto.persistence import (
     create_user,
     delete_report_record,
+    d1_status,
     list_users,
     list_recent_report_records,
     load_report_record,
     load_user_by_username,
     persistence_backend_name,
+    sync_local_state_to_d1,
     stale_report_ids,
     update_user,
     upsert_user,
@@ -52,7 +54,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.11.0"
+APP_VERSION = "1.12.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
 PASSWORD_HASH_ITERATIONS = 390000
@@ -175,6 +177,22 @@ async def admin_list_users(request: Request) -> JSONResponse:
     ensure_admin(request)
     items = list_users()
     return JSONResponse({"items": items, "count": len(items)})
+
+
+@app.get("/api/admin/persistence")
+async def admin_persistence_status(request: Request) -> JSONResponse:
+    ensure_admin(request)
+    return JSONResponse(d1_status())
+
+
+@app.post("/api/admin/persistence/sync-d1")
+async def admin_sync_d1(request: Request) -> JSONResponse:
+    ensure_admin(request)
+    try:
+        summary = sync_local_state_to_d1()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse({"synced": True, "summary": summary, "status": d1_status()})
 
 
 @app.post("/api/admin/users")

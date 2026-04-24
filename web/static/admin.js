@@ -15,6 +15,10 @@
   const userFormTitle = document.getElementById("admin-user-form-title");
   const userStatus = document.getElementById("admin-user-status");
   const userResetButton = document.getElementById("admin-user-reset");
+  const persistenceSummary = document.getElementById("admin-persistence-summary");
+  const persistenceStatus = document.getElementById("admin-persistence-status");
+  const persistenceJson = document.getElementById("admin-persistence-json");
+  const d1SyncButton = document.getElementById("admin-d1-sync");
 
   if (loginForm) {
     loginForm.addEventListener("submit", handleLoginSubmit);
@@ -23,6 +27,10 @@
   if (settingsForm) {
     loadSettings();
     settingsForm.addEventListener("submit", handleSettingsSubmit);
+  }
+
+  if (persistenceSummary) {
+    loadPersistenceStatus();
   }
 
   if (userForm) {
@@ -37,6 +45,10 @@
 
   if (logoutButton) {
     logoutButton.addEventListener("click", handleLogout);
+  }
+
+  if (d1SyncButton) {
+    d1SyncButton.addEventListener("click", handleD1Sync);
   }
 
   async function handleLoginSubmit(event) {
@@ -111,6 +123,21 @@
       }
       renderUsers([]);
       setStatus(userStatus, "error", error.message || "Falha ao carregar usuários.");
+    }
+  }
+
+  async function loadPersistenceStatus() {
+    setStatus(persistenceStatus, "loading", "Consultando status da persistência...");
+    try {
+      const response = await fetch("/api/admin/persistence", { method: "GET" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Falha ao carregar persistência.");
+      }
+      renderPersistenceStatus(payload);
+      setStatus(persistenceStatus, payload.enabled ? "success" : "error", payload.enabled ? "D1 pronto para sincronização." : "D1 ainda não configurado.");
+    } catch (error) {
+      setStatus(persistenceStatus, "error", error.message || "Falha ao carregar persistência.");
     }
   }
 
@@ -190,6 +217,24 @@
       setStatus(userStatus, "success", mode === "create" ? "Usuário criado com sucesso." : "Usuário atualizado com sucesso.");
     } catch (error) {
       setStatus(userStatus, "error", error.message || "Falha ao salvar usuário.");
+    }
+  }
+
+  async function handleD1Sync() {
+    setStatus(persistenceStatus, "loading", "Sincronizando base local para o D1...");
+    try {
+      const response = await fetch("/api/admin/persistence/sync-d1", { method: "POST" });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "Falha ao sincronizar D1.");
+      }
+      renderPersistenceStatus(payload.status || {});
+      if (persistenceJson) {
+        persistenceJson.textContent = JSON.stringify(payload, null, 2);
+      }
+      setStatus(persistenceStatus, "success", "Sincronização concluída com sucesso.");
+    } catch (error) {
+      setStatus(persistenceStatus, "error", error.message || "Falha ao sincronizar D1.");
     }
   }
 
@@ -390,6 +435,22 @@
         return card;
       }),
     );
+  }
+
+  function renderPersistenceStatus(status) {
+    if (!persistenceSummary) {
+      return;
+    }
+    const cards = [
+      summaryCard("Backend atual", status.backend || "sqlite", "Estado visto pelo healthcheck do app."),
+      summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando as variáveis D1 estão configuradas no Render."),
+      summaryCard("Database ID", status.databaseId || "—", "Identificador do banco D1 vinculado."),
+      summaryCard("Account ID", status.accountId || "—", "Conta Cloudflare usada para a API do D1."),
+    ];
+    persistenceSummary.replaceChildren.apply(persistenceSummary, cards);
+    if (persistenceJson) {
+      persistenceJson.textContent = JSON.stringify(status, null, 2);
+    }
   }
 
   function summaryCard(label, value, note) {

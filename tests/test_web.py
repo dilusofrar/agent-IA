@@ -236,13 +236,34 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(updated_user["displayName"], "Operador Líder")
         self.assertFalse(updated_user["isActive"])
 
+    def test_admin_can_inspect_persistence_status(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            response = client.get("/api/admin/persistence")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["backend"], "sqlite")
+        self.assertFalse(response.json()["enabled"])
+
+    def test_sync_d1_requires_configuration(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            response = client.post("/api/admin/persistence/sync-d1")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("D1", response.json()["detail"])
+
     def test_healthcheck_returns_security_headers(self):
         client = TestClient(app)
 
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.11.0")
+        self.assertEqual(response.json()["version"], "1.12.0")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")

@@ -127,6 +127,16 @@ def persistence_backend_name() -> str:
     return "sqlite+d1" if d1_client() is not None else "sqlite"
 
 
+def d1_status() -> dict[str, Any]:
+    client = d1_client()
+    return {
+        "enabled": client is not None,
+        "backend": persistence_backend_name(),
+        "databaseId": getattr(client, "database_id", None) if client is not None else None,
+        "accountId": getattr(client, "account_id", None) if client is not None else None,
+    }
+
+
 def mirror_execute(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> None:
     client = d1_client()
     if client is None:
@@ -158,6 +168,118 @@ def mirror_fetch_all(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list
     except Exception as exc:
         LOGGER.warning("d1_mirror_fetch_failed", extra={"error": str(exc), "sql": sql})
         return []
+
+
+def sync_local_state_to_d1() -> dict[str, int]:
+    client = d1_client()
+    if client is None:
+        raise RuntimeError("D1 não configurado.")
+    ensure_app_db()
+    summary = {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0}
+    client.execute_script(
+        """
+        DELETE FROM settings_current;
+        DELETE FROM settings_audit;
+        DELETE FROM reports;
+        DELETE FROM users;
+        """
+    )
+    with open_db() as connection:
+        settings_rows = connection.execute(
+            "SELECT scope, payload_json, updated_at FROM settings_current"
+        ).fetchall()
+        for row in settings_rows:
+            client.execute(
+                """
+                INSERT INTO settings_current (scope, payload_json, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                [row["scope"], row["payload_json"], row["updated_at"]],
+            )
+            summary["settingsCurrent"] += 1
+
+        audit_rows = connection.execute(
+            "SELECT changed_at, actor, changes_json, settings_json FROM settings_audit ORDER BY id ASC"
+        ).fetchall()
+        for row in audit_rows:
+            client.execute(
+                """
+                INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                [row["changed_at"], row["actor"], row["changes_json"], row["settings_json"]],
+            )
+            summary["settingsAudit"] += 1
+
+        report_rows = connection.execute(
+            """
+            SELECT report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
+                   processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
+                   export_pdf_key, source_pdf_path, export_pdf_path
+            FROM reports
+            ORDER BY created_at ASC
+            """
+        ).fetchall()
+        for row in report_rows:
+            client.execute(
+                """
+                INSERT INTO reports (
+                    report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
+                    processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
+                    export_pdf_key, source_pdf_path, export_pdf_path
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    row["report_id"],
+                    row["filename"],
+                    row["employee_name"],
+                    row["owner_user_id"],
+                    row["owner_username"],
+                    row["period_start"],
+                    row["period_end"],
+                    row["processed_at"],
+                    row["created_at"],
+                    row["processing_duration_ms"],
+                    row["recent_json"],
+                    row["payload_json"],
+                    row["source_pdf_key"],
+                    row["export_pdf_key"],
+                    row["source_pdf_path"],
+                    row["export_pdf_path"],
+                ],
+            )
+            summary["reports"] += 1
+
+        user_rows = connection.execute(
+            """
+            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            FROM users
+            ORDER BY created_at ASC
+            """
+        ).fetchall()
+        for row in user_rows:
+            client.execute(
+                """
+                INSERT INTO users (
+                    id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    row["id"],
+                    row["username"],
+                    row["email"],
+                    row["display_name"],
+                    row["password_hash"],
+                    row["role"],
+                    row["is_active"],
+                    row["created_at"],
+                    row["updated_at"],
+                ],
+            )
+            summary["users"] += 1
+    return summary
 
 
 def save_current_settings_payload(payload: dict[str, Any]) -> None:

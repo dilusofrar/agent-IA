@@ -1168,6 +1168,17 @@ p { margin: 0; }
   overflow: auto;
 }
 
+.admin-persistence-json {
+  margin: 0;
+  padding: 16px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .admin-users-panel {
   margin-top: 20px;
 }
