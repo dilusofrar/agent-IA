@@ -263,7 +263,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.12.0")
+        self.assertEqual(response.json()["version"], "1.13.0")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
@@ -277,6 +277,18 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["persistenceBackend"], "sqlite+d1")
+        self.assertTrue(response.json()["persistenceBackend"].startswith("sqlite"))
+
+    def test_load_current_settings_prefers_d1_when_enabled(self):
+        persistence_module._D1_CLIENT = SimpleNamespace()
+        with patch("conferir_ponto.persistence.mirror_fetch_one", return_value={"payload_json": '{"defaultSchedule":{"start":"09:00","lunchStart":"12:00","lunchEnd":"13:00","end":"18:00"}}'}), patch.dict(
+            "os.environ",
+            {"D1_PREFER_READS": "true"},
+            clear=False,
+        ):
+            payload = persistence_module.load_current_settings_payload()
+
+        self.assertEqual(payload["defaultSchedule"]["start"], "09:00")
 
     def test_get_settings_returns_persisted_configuration(self):
         client = TestClient(app)

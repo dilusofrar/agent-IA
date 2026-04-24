@@ -444,6 +444,7 @@
     const cards = [
       summaryCard("Backend atual", status.backend || "sqlite", "Estado visto pelo healthcheck do app."),
       summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando as variáveis D1 estão configuradas no Render."),
+      summaryCard("Leitura preferida", status.preferReads ? "D1" : "SQLite", "Quando ativo, o app lê primeiro do D1 e usa SQLite como fallback."),
       summaryCard("Database ID", status.databaseId || "—", "Identificador do banco D1 vinculado."),
       summaryCard("Account ID", status.accountId || "—", "Conta Cloudflare usada para a API do D1."),
     ];
