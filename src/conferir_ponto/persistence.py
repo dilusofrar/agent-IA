@@ -141,8 +141,7 @@ def persistence_backend_name() -> str:
 
 
 def prefer_d1_reads() -> bool:
-    raw_value = os.getenv("D1_PREFER_READS", "true").strip().lower()
-    return raw_value not in {"0", "false", "no", "off"}
+    return d1_client() is not None
 
 
 def d1_status() -> dict[str, Any]:
@@ -153,6 +152,395 @@ def d1_status() -> dict[str, Any]:
         "preferReads": bool(client is not None and prefer_d1_reads()),
         "databaseId": getattr(client, "database_id", None) if client is not None else None,
         "accountId": getattr(client, "account_id", None) if client is not None else None,
+    }
+
+
+def _local_upsert_settings_current(scope: str, payload_json: str, updated_at: str) -> None:
+    with open_db() as connection:
+        connection.execute(
+            """
+            INSERT INTO settings_current (scope, payload_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(scope) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            (scope, payload_json, updated_at),
+        )
+
+
+def _local_replace_settings_audit(rows: list[dict[str, Any]]) -> None:
+    with open_db() as connection:
+        connection.execute("DELETE FROM settings_audit")
+        connection.executemany(
+            """
+            INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["changed_at"],
+                    row["actor"],
+                    row["changes_json"],
+                    row["settings_json"],
+                )
+                for row in rows
+            ],
+        )
+
+
+def _local_upsert_report_row(
+    *,
+    report_id: str,
+    filename: str,
+    employee_name: str | None,
+    owner_user_id: str | None,
+    owner_username: str | None,
+    period_start: str | None,
+    period_end: str | None,
+    processed_at: str | None,
+    created_at: str,
+    processing_duration_ms: int | None,
+    recent_json: str,
+    payload_json: str,
+    source_pdf_key: str | None,
+    export_pdf_key: str | None,
+    source_pdf_path: str | None,
+    export_pdf_path: str | None,
+) -> None:
+    with open_db() as connection:
+        connection.execute(
+            """
+            INSERT INTO reports (
+                report_id,
+                filename,
+                employee_name,
+                owner_user_id,
+                owner_username,
+                period_start,
+                period_end,
+                processed_at,
+                created_at,
+                processing_duration_ms,
+                recent_json,
+                payload_json,
+                source_pdf_key,
+                export_pdf_key,
+                source_pdf_path,
+                export_pdf_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(report_id) DO UPDATE SET
+                filename = excluded.filename,
+                employee_name = excluded.employee_name,
+                owner_user_id = excluded.owner_user_id,
+                owner_username = excluded.owner_username,
+                period_start = excluded.period_start,
+                period_end = excluded.period_end,
+                processed_at = excluded.processed_at,
+                created_at = excluded.created_at,
+                processing_duration_ms = excluded.processing_duration_ms,
+                recent_json = excluded.recent_json,
+                payload_json = excluded.payload_json,
+                source_pdf_key = excluded.source_pdf_key,
+                export_pdf_key = excluded.export_pdf_key,
+                source_pdf_path = excluded.source_pdf_path,
+                export_pdf_path = excluded.export_pdf_path
+            """,
+            (
+                report_id,
+                filename,
+                employee_name,
+                owner_user_id,
+                owner_username,
+                period_start,
+                period_end,
+                processed_at,
+                created_at,
+                processing_duration_ms,
+                recent_json,
+                payload_json,
+                source_pdf_key,
+                export_pdf_key,
+                source_pdf_path,
+                export_pdf_path,
+            ),
+        )
+
+
+def _local_replace_reports(rows: list[dict[str, Any]]) -> None:
+    with open_db() as connection:
+        connection.execute("DELETE FROM reports")
+        connection.executemany(
+            """
+            INSERT INTO reports (
+                report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
+                processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
+                export_pdf_key, source_pdf_path, export_pdf_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["report_id"],
+                    row["filename"],
+                    row["employee_name"],
+                    row["owner_user_id"],
+                    row["owner_username"],
+                    row["period_start"],
+                    row["period_end"],
+                    row["processed_at"],
+                    row["created_at"],
+                    row["processing_duration_ms"],
+                    row["recent_json"],
+                    row["payload_json"],
+                    row["source_pdf_key"],
+                    row["export_pdf_key"],
+                    row["source_pdf_path"],
+                    row["export_pdf_path"],
+                )
+                for row in rows
+            ],
+        )
+
+
+def _local_upsert_user_row(
+    *,
+    user_id: str,
+    username: str,
+    email: str | None,
+    display_name: str | None,
+    password_hash: str | None,
+    role: str,
+    is_active: bool,
+    created_at: str,
+    updated_at: str,
+) -> None:
+    with open_db() as connection:
+        connection.execute(
+            """
+            INSERT INTO users (
+                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                id = excluded.id,
+                email = excluded.email,
+                display_name = excluded.display_name,
+                password_hash = excluded.password_hash,
+                role = excluded.role,
+                is_active = excluded.is_active,
+                updated_at = excluded.updated_at
+            """,
+            (
+                user_id,
+                username,
+                email,
+                display_name,
+                password_hash,
+                role,
+                1 if is_active else 0,
+                created_at,
+                updated_at,
+            ),
+        )
+
+
+def _local_replace_users(rows: list[dict[str, Any]]) -> None:
+    with open_db() as connection:
+        connection.execute("DELETE FROM users")
+        connection.executemany(
+            """
+            INSERT INTO users (
+                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["id"],
+                    row["username"],
+                    row["email"],
+                    row["display_name"],
+                    row["password_hash"],
+                    row["role"],
+                    row["is_active"],
+                    row["created_at"],
+                    row["updated_at"],
+                )
+                for row in rows
+            ],
+        )
+
+
+def _local_append_user_audit(changed_at: str, actor: str, target_username: str, action: str, changes_json: str) -> None:
+    with open_db() as connection:
+        connection.execute(
+            """
+            INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (changed_at, actor, target_username, action, changes_json),
+        )
+
+
+def _local_replace_user_audit(rows: list[dict[str, Any]]) -> None:
+    with open_db() as connection:
+        connection.execute("DELETE FROM user_audit")
+        connection.executemany(
+            """
+            INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["changed_at"],
+                    row["actor"],
+                    row["target_username"],
+                    row["action"],
+                    row["changes_json"],
+                )
+                for row in rows
+            ],
+        )
+
+
+def hydrate_local_cache_from_d1() -> dict[str, int]:
+    client = d1_client()
+    if client is None:
+        return {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0, "userAudit": 0}
+    ensure_app_db()
+    settings_rows = client.query(
+        "SELECT scope, payload_json, updated_at FROM settings_current"
+    )
+    settings_audit_rows = client.query(
+        """
+        SELECT changed_at, actor, changes_json, settings_json
+        FROM settings_audit
+        ORDER BY changed_at ASC
+        """
+    )
+    report_rows = client.query(
+        """
+        SELECT report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
+               processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
+               export_pdf_key, source_pdf_path, export_pdf_path
+        FROM reports
+        ORDER BY created_at ASC
+        """
+    )
+    user_rows = client.query(
+        """
+        SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+        FROM users
+        ORDER BY created_at ASC
+        """
+    )
+    user_audit_rows = client.query(
+        """
+        SELECT changed_at, actor, target_username, action, changes_json
+        FROM user_audit
+        ORDER BY changed_at ASC
+        """
+    )
+    with open_db() as connection:
+        connection.execute("DELETE FROM settings_current")
+        connection.execute("DELETE FROM settings_audit")
+        connection.execute("DELETE FROM reports")
+        connection.execute("DELETE FROM users")
+        connection.execute("DELETE FROM user_audit")
+        connection.executemany(
+            """
+            INSERT INTO settings_current (scope, payload_json, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            [(row["scope"], row["payload_json"], row["updated_at"]) for row in settings_rows],
+        )
+        connection.executemany(
+            """
+            INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                (row["changed_at"], row["actor"], row["changes_json"], row["settings_json"])
+                for row in settings_audit_rows
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO reports (
+                report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
+                processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
+                export_pdf_key, source_pdf_path, export_pdf_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["report_id"],
+                    row["filename"],
+                    row["employee_name"],
+                    row["owner_user_id"],
+                    row["owner_username"],
+                    row["period_start"],
+                    row["period_end"],
+                    row["processed_at"],
+                    row["created_at"],
+                    row["processing_duration_ms"],
+                    row["recent_json"],
+                    row["payload_json"],
+                    row["source_pdf_key"],
+                    row["export_pdf_key"],
+                    row["source_pdf_path"],
+                    row["export_pdf_path"],
+                )
+                for row in report_rows
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO users (
+                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["id"],
+                    row["username"],
+                    row["email"],
+                    row["display_name"],
+                    row["password_hash"],
+                    row["role"],
+                    row["is_active"],
+                    row["created_at"],
+                    row["updated_at"],
+                )
+                for row in user_rows
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    row["changed_at"],
+                    row["actor"],
+                    row["target_username"],
+                    row["action"],
+                    row["changes_json"],
+                )
+                for row in user_audit_rows
+            ],
+        )
+    return {
+        "settingsCurrent": len(settings_rows),
+        "settingsAudit": len(settings_audit_rows),
+        "reports": len(report_rows),
+        "users": len(user_rows),
+        "userAudit": len(user_audit_rows),
     }
 
 
@@ -426,8 +814,10 @@ def sync_local_state_to_d1() -> dict[str, int]:
 
 def save_current_settings_payload(payload: dict[str, Any]) -> None:
     updated_at = datetime.now().isoformat(timespec="seconds")
-    with open_db() as connection:
-        connection.execute(
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    client = d1_client()
+    if client is not None:
+        client.execute(
             """
             INSERT INTO settings_current (scope, payload_json, updated_at)
             VALUES (?, ?, ?)
@@ -435,36 +825,27 @@ def save_current_settings_payload(payload: dict[str, Any]) -> None:
                 payload_json = excluded.payload_json,
                 updated_at = excluded.updated_at
             """,
-            ("global", json.dumps(payload, ensure_ascii=False), updated_at),
+            ["global", payload_json, updated_at],
         )
-    mirror_execute(
-        """
-        INSERT INTO settings_current (scope, payload_json, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(scope) DO UPDATE SET
-            payload_json = excluded.payload_json,
-            updated_at = excluded.updated_at
-        """,
-        ("global", json.dumps(payload, ensure_ascii=False), updated_at),
-    )
+    _local_upsert_settings_current("global", payload_json, updated_at)
 
 
 def load_current_settings_payload() -> dict[str, Any] | None:
-    if d1_client() is not None and prefer_d1_reads():
+    client = d1_client()
+    if client is not None:
         d1_row = mirror_fetch_one(
-            "SELECT payload_json FROM settings_current WHERE scope = ?",
+            "SELECT payload_json, updated_at FROM settings_current WHERE scope = ?",
             ("global",),
         )
         if d1_row is not None:
+            _local_upsert_settings_current(
+                "global",
+                d1_row["payload_json"],
+                d1_row.get("updated_at") or datetime.now().isoformat(timespec="seconds"),
+            )
             return json.loads(d1_row["payload_json"])
     if not APP_DB_PATH.exists():
-        d1_row = mirror_fetch_one(
-            "SELECT payload_json FROM settings_current WHERE scope = ?",
-            ("global",),
-        )
-        if d1_row is None:
-            return None
-        return json.loads(d1_row["payload_json"])
+        return None
     with open_db() as connection:
         row = connection.execute(
             "SELECT payload_json FROM settings_current WHERE scope = ?",
@@ -472,45 +853,34 @@ def load_current_settings_payload() -> dict[str, Any] | None:
         ).fetchone()
     if row is not None:
         return json.loads(row["payload_json"])
-    d1_row = mirror_fetch_one(
-        "SELECT payload_json FROM settings_current WHERE scope = ?",
-        ("global",),
-    )
-    if d1_row is None:
-        return None
-    return json.loads(d1_row["payload_json"])
+    return None
 
 
 def append_settings_audit_entry(entry: dict[str, Any]) -> None:
+    changes_json = json.dumps(entry.get("changes", []), ensure_ascii=False)
+    settings_json = json.dumps(entry.get("settings", {}), ensure_ascii=False)
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        client.execute(
+            """
+            INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            [entry["changedAt"], entry["actor"], changes_json, settings_json],
+        )
     with open_db() as connection:
         connection.execute(
             """
             INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
             VALUES (?, ?, ?, ?)
             """,
-            (
-                entry["changedAt"],
-                entry["actor"],
-                json.dumps(entry.get("changes", []), ensure_ascii=False),
-                json.dumps(entry.get("settings", {}), ensure_ascii=False),
-            ),
+            (entry["changedAt"], entry["actor"], changes_json, settings_json),
         )
-    mirror_execute(
-        """
-        INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
-        VALUES (?, ?, ?, ?)
-        """,
-        (
-            entry["changedAt"],
-            entry["actor"],
-            json.dumps(entry.get("changes", []), ensure_ascii=False),
-            json.dumps(entry.get("settings", {}), ensure_ascii=False),
-        ),
-    )
 
 
 def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
-    if d1_client() is not None and prefer_d1_reads():
+    client = d1_client()
+    if client is not None:
         d1_rows = mirror_fetch_all(
             """
             SELECT changed_at, actor, changes_json, settings_json
@@ -521,6 +891,7 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
             (max(0, int(limit)),),
         )
         if d1_rows:
+            _local_replace_settings_audit(list(reversed(d1_rows)))
             return [
                 {
                     "changedAt": row["changed_at"],
@@ -531,24 +902,7 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
                 for row in d1_rows
             ]
     if not APP_DB_PATH.exists():
-        d1_rows = mirror_fetch_all(
-            """
-            SELECT changed_at, actor, changes_json, settings_json
-            FROM settings_audit
-            ORDER BY changed_at DESC
-            LIMIT ?
-            """,
-            (max(0, int(limit)),),
-        )
-        return [
-            {
-                "changedAt": row["changed_at"],
-                "actor": row["actor"],
-                "changes": json.loads(row["changes_json"]),
-                "settings": json.loads(row["settings_json"]),
-            }
-            for row in d1_rows
-        ]
+        return []
     with open_db() as connection:
         rows = connection.execute(
             """
@@ -569,24 +923,7 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
             }
             for row in rows
         ]
-    d1_rows = mirror_fetch_all(
-        """
-        SELECT changed_at, actor, changes_json, settings_json
-        FROM settings_audit
-        ORDER BY changed_at DESC
-        LIMIT ?
-        """,
-        (max(0, int(limit)),),
-    )
-    return [
-        {
-            "changedAt": row["changed_at"],
-            "actor": row["actor"],
-            "changes": json.loads(row["changes_json"]),
-            "settings": json.loads(row["settings_json"]),
-        }
-        for row in d1_rows
-    ]
+    return []
 
 
 def upsert_report_record(
@@ -607,8 +944,11 @@ def upsert_report_record(
         or payload.get("meta", {}).get("generatedAt")
         or datetime.now().isoformat(timespec="seconds")
     )
-    with open_db() as connection:
-        connection.execute(
+    recent_json = json.dumps(recent, ensure_ascii=False)
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        client.execute(
             """
             INSERT INTO reports (
                 report_id,
@@ -646,7 +986,7 @@ def upsert_report_record(
                 source_pdf_path = excluded.source_pdf_path,
                 export_pdf_path = excluded.export_pdf_path
             """,
-            (
+            [
                 report_id,
                 filename,
                 payload.get("employeeName"),
@@ -657,84 +997,65 @@ def upsert_report_record(
                 payload.get("processedAt"),
                 created_at,
                 payload.get("meta", {}).get("processingDurationMs"),
-                json.dumps(recent, ensure_ascii=False),
-                json.dumps(payload, ensure_ascii=False),
+                recent_json,
+                payload_json,
                 source_pdf_key,
                 export_pdf_key,
                 source_pdf_path,
                 export_pdf_path,
-            ),
+            ],
         )
-    mirror_execute(
-        """
-        INSERT INTO reports (
-            report_id,
-            filename,
-            employee_name,
-            owner_user_id,
-            owner_username,
-            period_start,
-            period_end,
-            processed_at,
-            created_at,
-            processing_duration_ms,
-            recent_json,
-            payload_json,
-            source_pdf_key,
-            export_pdf_key,
-            source_pdf_path,
-            export_pdf_path
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(report_id) DO UPDATE SET
-            filename = excluded.filename,
-            employee_name = excluded.employee_name,
-            owner_user_id = excluded.owner_user_id,
-            owner_username = excluded.owner_username,
-            period_start = excluded.period_start,
-            period_end = excluded.period_end,
-            processed_at = excluded.processed_at,
-            created_at = excluded.created_at,
-            processing_duration_ms = excluded.processing_duration_ms,
-            recent_json = excluded.recent_json,
-            payload_json = excluded.payload_json,
-            source_pdf_key = excluded.source_pdf_key,
-            export_pdf_key = excluded.export_pdf_key,
-            source_pdf_path = excluded.source_pdf_path,
-            export_pdf_path = excluded.export_pdf_path
-        """,
-        (
-            report_id,
-            filename,
-            payload.get("employeeName"),
-            owner_user_id,
-            owner_username,
-            payload.get("periodStart"),
-            payload.get("periodEnd"),
-            payload.get("processedAt"),
-            created_at,
-            payload.get("meta", {}).get("processingDurationMs"),
-            json.dumps(recent, ensure_ascii=False),
-            json.dumps(payload, ensure_ascii=False),
-            source_pdf_key,
-            export_pdf_key,
-            source_pdf_path,
-            export_pdf_path,
-        ),
+    _local_upsert_report_row(
+        report_id=report_id,
+        filename=filename,
+        employee_name=payload.get("employeeName"),
+        owner_user_id=owner_user_id,
+        owner_username=owner_username,
+        period_start=payload.get("periodStart"),
+        period_end=payload.get("periodEnd"),
+        processed_at=payload.get("processedAt"),
+        created_at=created_at,
+        processing_duration_ms=payload.get("meta", {}).get("processingDurationMs"),
+        recent_json=recent_json,
+        payload_json=payload_json,
+        source_pdf_key=source_pdf_key,
+        export_pdf_key=export_pdf_key,
+        source_pdf_path=source_pdf_path,
+        export_pdf_path=export_pdf_path,
     )
 
 
 def load_report_record(report_id: str) -> dict[str, Any] | None:
-    if d1_client() is not None and prefer_d1_reads():
+    client = d1_client()
+    if client is not None:
         selected_row = mirror_fetch_one(
             """
-            SELECT filename, owner_user_id, owner_username, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
+            SELECT filename, owner_user_id, owner_username, period_start, period_end, processed_at, created_at,
+                   processing_duration_ms, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
             FROM reports
             WHERE report_id = ?
             """,
             (report_id,),
         )
         if selected_row is not None:
+            _local_upsert_report_row(
+                report_id=report_id,
+                filename=selected_row["filename"],
+                employee_name=json.loads(selected_row["payload_json"]).get("employeeName"),
+                owner_user_id=selected_row["owner_user_id"],
+                owner_username=selected_row["owner_username"],
+                period_start=selected_row["period_start"],
+                period_end=selected_row["period_end"],
+                processed_at=selected_row["processed_at"],
+                created_at=selected_row["created_at"],
+                processing_duration_ms=selected_row["processing_duration_ms"],
+                recent_json=selected_row["recent_json"],
+                payload_json=selected_row["payload_json"],
+                source_pdf_key=selected_row["source_pdf_key"],
+                export_pdf_key=selected_row["export_pdf_key"],
+                source_pdf_path=selected_row["source_pdf_path"],
+                export_pdf_path=selected_row["export_pdf_path"],
+            )
             return {
                 "reportId": report_id,
                 "filename": selected_row["filename"],
@@ -748,28 +1069,7 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
                 "exportPdfPath": selected_row["export_pdf_path"],
             }
     if not APP_DB_PATH.exists():
-        selected_row = mirror_fetch_one(
-            """
-            SELECT filename, owner_user_id, owner_username, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
-            FROM reports
-            WHERE report_id = ?
-            """,
-            (report_id,),
-        )
-        if selected_row is None:
-            return None
-        return {
-            "reportId": report_id,
-            "filename": selected_row["filename"],
-            "ownerUserId": selected_row["owner_user_id"],
-            "ownerUsername": selected_row["owner_username"],
-            "recent": json.loads(selected_row["recent_json"]),
-            "payload": json.loads(selected_row["payload_json"]),
-            "sourcePdfKey": selected_row["source_pdf_key"],
-            "exportPdfKey": selected_row["export_pdf_key"],
-            "sourcePdfPath": selected_row["source_pdf_path"],
-            "exportPdfPath": selected_row["export_pdf_path"],
-        }
+        return None
     with open_db() as connection:
         row = connection.execute(
             """
@@ -779,37 +1079,30 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
             """,
             (report_id,),
         ).fetchone()
-    selected_row: Any = row
-    if selected_row is None:
-        selected_row = mirror_fetch_one(
-            """
-            SELECT filename, owner_user_id, owner_username, recent_json, payload_json, source_pdf_key, export_pdf_key, source_pdf_path, export_pdf_path
-            FROM reports
-            WHERE report_id = ?
-            """,
-            (report_id,),
-        )
-    if selected_row is None:
+    if row is None:
         return None
     return {
         "reportId": report_id,
-        "filename": selected_row["filename"],
-        "ownerUserId": selected_row["owner_user_id"],
-        "ownerUsername": selected_row["owner_username"],
-        "recent": json.loads(selected_row["recent_json"]),
-        "payload": json.loads(selected_row["payload_json"]),
-        "sourcePdfKey": selected_row["source_pdf_key"],
-        "exportPdfKey": selected_row["export_pdf_key"],
-        "sourcePdfPath": selected_row["source_pdf_path"],
-        "exportPdfPath": selected_row["export_pdf_path"],
+        "filename": row["filename"],
+        "ownerUserId": row["owner_user_id"],
+        "ownerUsername": row["owner_username"],
+        "recent": json.loads(row["recent_json"]),
+        "payload": json.loads(row["payload_json"]),
+        "sourcePdfKey": row["source_pdf_key"],
+        "exportPdfKey": row["export_pdf_key"],
+        "sourcePdfPath": row["source_pdf_path"],
+        "exportPdfPath": row["export_pdf_path"],
     }
 
 
 def list_recent_report_records(limit: int) -> list[dict[str, Any]]:
-    if d1_client() is not None and prefer_d1_reads():
+    client = d1_client()
+    if client is not None:
         d1_rows = mirror_fetch_all(
             """
-            SELECT recent_json
+            SELECT report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
+                   processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
+                   export_pdf_key, source_pdf_path, export_pdf_path
             FROM reports
             ORDER BY created_at DESC
             LIMIT ?
@@ -817,18 +1110,28 @@ def list_recent_report_records(limit: int) -> list[dict[str, Any]]:
             (max(0, int(limit)),),
         )
         if d1_rows:
+            for row in d1_rows:
+                _local_upsert_report_row(
+                    report_id=row["report_id"],
+                    filename=row["filename"],
+                    employee_name=row["employee_name"],
+                    owner_user_id=row["owner_user_id"],
+                    owner_username=row["owner_username"],
+                    period_start=row["period_start"],
+                    period_end=row["period_end"],
+                    processed_at=row["processed_at"],
+                    created_at=row["created_at"],
+                    processing_duration_ms=row["processing_duration_ms"],
+                    recent_json=row["recent_json"],
+                    payload_json=row["payload_json"],
+                    source_pdf_key=row["source_pdf_key"],
+                    export_pdf_key=row["export_pdf_key"],
+                    source_pdf_path=row["source_pdf_path"],
+                    export_pdf_path=row["export_pdf_path"],
+                )
             return [json.loads(row["recent_json"]) for row in d1_rows]
     if not APP_DB_PATH.exists():
-        d1_rows = mirror_fetch_all(
-            """
-            SELECT recent_json
-            FROM reports
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            (max(0, int(limit)),),
-        )
-        return [json.loads(row["recent_json"]) for row in d1_rows]
+        return []
     with open_db() as connection:
         rows = connection.execute(
             """
@@ -839,18 +1142,7 @@ def list_recent_report_records(limit: int) -> list[dict[str, Any]]:
             """,
             (max(0, int(limit)),),
         ).fetchall()
-    if rows:
-        return [json.loads(row["recent_json"]) for row in rows]
-    d1_rows = mirror_fetch_all(
-        """
-        SELECT recent_json
-        FROM reports
-        ORDER BY created_at DESC
-        LIMIT ?
-        """,
-        (max(0, int(limit)),),
-    )
-    return [json.loads(row["recent_json"]) for row in d1_rows]
+    return [json.loads(row["recent_json"]) for row in rows]
 
 
 def update_user(
@@ -870,53 +1162,66 @@ def update_user(
         raise ValueError("Usuário não encontrado.")
     effective_password_hash = password_hash if password_hash is not None else existing.get("passwordHash")
     now = datetime.now().isoformat(timespec="seconds")
-    with open_db() as connection:
-        connection.execute(
+    effective_email = email if email is not None else existing.get("email")
+    effective_display_name = display_name if display_name is not None else existing.get("displayName")
+    effective_role = role if role is not None else existing.get("role")
+    effective_is_active = bool(is_active if is_active is not None else existing.get("isActive"))
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        client.execute(
             """
-            UPDATE users
-            SET email = ?, display_name = ?, password_hash = ?, role = ?, is_active = ?, updated_at = ?
-            WHERE username = ?
+            INSERT INTO users (
+                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                email = excluded.email,
+                display_name = excluded.display_name,
+                password_hash = excluded.password_hash,
+                role = excluded.role,
+                is_active = excluded.is_active,
+                updated_at = excluded.updated_at
             """,
-            (
-                email if email is not None else existing.get("email"),
-                display_name if display_name is not None else existing.get("displayName"),
-                effective_password_hash,
-                role if role is not None else existing.get("role"),
-                1 if (is_active if is_active is not None else existing.get("isActive")) else 0,
-                now,
+            [
+                existing.get("id"),
                 normalized_username,
-            ),
+                effective_email,
+                effective_display_name,
+                effective_password_hash,
+                effective_role,
+                1 if effective_is_active else 0,
+                existing.get("createdAt"),
+                now,
+            ],
         )
-    mirror_execute(
-        """
-        INSERT INTO users (
-            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(username) DO UPDATE SET
-            email = excluded.email,
-            display_name = excluded.display_name,
-            password_hash = excluded.password_hash,
-            role = excluded.role,
-            is_active = excluded.is_active,
-            updated_at = excluded.updated_at
-        """,
-        (
-            existing.get("id"),
-            normalized_username,
-            email if email is not None else existing.get("email"),
-            display_name if display_name is not None else existing.get("displayName"),
-            effective_password_hash,
-            role if role is not None else existing.get("role"),
-            1 if (is_active if is_active is not None else existing.get("isActive")) else 0,
-            existing.get("createdAt"),
-            now,
-        ),
+    _local_upsert_user_row(
+        user_id=existing.get("id"),
+        username=normalized_username,
+        email=effective_email,
+        display_name=effective_display_name,
+        password_hash=effective_password_hash,
+        role=effective_role,
+        is_active=effective_is_active,
+        created_at=existing.get("createdAt"),
+        updated_at=now,
     )
     return load_user_by_username(normalized_username) or {}
 
 
 def stale_report_ids(max_records: int) -> list[str]:
+    client = d1_client()
+    if client is not None:
+        rows = mirror_fetch_all(
+            """
+            SELECT report_id
+            FROM reports
+            ORDER BY created_at DESC
+            LIMIT -1 OFFSET ?
+            """,
+            (max(0, int(max_records)),),
+        )
+        if rows:
+            return [row["report_id"] for row in rows]
     if not APP_DB_PATH.exists():
         return []
     with open_db() as connection:
@@ -933,12 +1238,12 @@ def stale_report_ids(max_records: int) -> list[str]:
 
 
 def delete_report_record(report_id: str) -> None:
-    if not APP_DB_PATH.exists():
-        mirror_execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
-        return
-    with open_db() as connection:
-        connection.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
-    mirror_execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        client.execute("DELETE FROM reports WHERE report_id = ?", [report_id])
+    if APP_DB_PATH.exists():
+        with open_db() as connection:
+            connection.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
 
 
 def load_user_by_username(username: str) -> dict[str, Any] | None:
@@ -946,8 +1251,20 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
     if not normalized_username:
         return None
     local_user: dict[str, Any] | None = None
-    d1_user: dict[str, Any] | None = None
-    if d1_client() is not None and prefer_d1_reads():
+    if APP_DB_PATH.exists():
+        with open_db() as connection:
+            row = connection.execute(
+                """
+                SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+                FROM users
+                WHERE username = ?
+                """,
+                (normalized_username,),
+            ).fetchone()
+        if row is not None:
+            local_user = _row_to_user(row)
+    client = d1_client()
+    if client is not None:
         selected_row = mirror_fetch_one(
             """
             SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
@@ -958,47 +1275,23 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
         )
         if selected_row is not None:
             d1_user = _row_to_user(selected_row)
+            primary_user, fallback_user = _prefer_newer_user_record(d1_user, local_user)
+            merged_user = _merge_user_records(primary_user, fallback_user) or d1_user
+            _local_upsert_user_row(
+                user_id=merged_user["id"],
+                username=merged_user["username"],
+                email=merged_user["email"],
+                display_name=merged_user["displayName"],
+                password_hash=merged_user["passwordHash"],
+                role=merged_user["role"],
+                is_active=bool(merged_user["isActive"]),
+                created_at=merged_user["createdAt"],
+                updated_at=merged_user["updatedAt"],
+            )
+            return merged_user
     if not APP_DB_PATH.exists():
-        if d1_user is not None:
-            return d1_user
-        selected_row = mirror_fetch_one(
-            """
-            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            FROM users
-            WHERE username = ?
-            """,
-            (normalized_username,),
-        )
-        return _row_to_user(selected_row) if selected_row is not None else None
-    with open_db() as connection:
-        row = connection.execute(
-            """
-            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            FROM users
-            WHERE username = ?
-            """,
-            (normalized_username,),
-        ).fetchone()
-    if row is not None:
-        local_user = _row_to_user(row)
-    if local_user is None and d1_user is None:
-        selected_row = mirror_fetch_one(
-            """
-            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            FROM users
-            WHERE username = ?
-            """,
-            (normalized_username,),
-        )
-        d1_user = _row_to_user(selected_row) if selected_row is not None else None
-    if local_user is not None and d1_user is None and d1_client() is not None:
-        _mirror_user_record(local_user)
-    primary_user, fallback_user = (
-        _prefer_newer_user_record(local_user, d1_user)
-        if prefer_d1_reads()
-        else (local_user, d1_user)
-    )
-    return _merge_user_records(primary_user, fallback_user)
+        return None
+    return local_user
 
 
 def list_users(limit: int = 100) -> list[dict[str, Any]]:
@@ -1021,46 +1314,21 @@ def list_users(limit: int = 100) -> list[dict[str, Any]]:
         LIMIT ?
     """
     effective_limit = max(1, int(limit))
-    d1_users = [
-        normalize_row(row)
-        for row in mirror_fetch_all(query, (effective_limit,))
-    ]
+    client = d1_client()
+    if client is not None:
+        d1_rows = mirror_fetch_all(query, (effective_limit,))
+        d1_users = [normalize_row(row) for row in d1_rows]
+        if d1_rows:
+            _local_replace_users(d1_rows)
+            return d1_users
     if not APP_DB_PATH.exists():
-        return d1_users
+        return []
 
     with open_db() as connection:
         local_rows = connection.execute(query, (effective_limit,)).fetchall()
     local_users = [normalize_row(row) for row in local_rows]
 
-    if not local_users:
-        return d1_users
-    if not d1_users:
-        for user in local_users:
-            full_user = load_user_by_username(user["username"])
-            if full_user is not None:
-                _mirror_user_record(full_user)
-        return local_users
-
-    d1_by_username = {user["username"]: user for user in d1_users}
-    merged_users: list[dict[str, Any]] = []
-    for local_user in local_users:
-        d1_user = d1_by_username.pop(local_user["username"], None)
-        if d1_user is None:
-            full_user = load_user_by_username(local_user["username"])
-            if full_user is not None:
-                _mirror_user_record(full_user)
-            merged_users.append(local_user)
-            continue
-        primary_user, fallback_user = (
-            _prefer_newer_user_record(local_user, d1_user)
-            if prefer_d1_reads()
-            else (local_user, d1_user)
-        )
-        merged_users.append(_merge_user_records(primary_user, fallback_user) or local_user)
-
-    merged_users.extend(d1_by_username.values())
-    merged_users.sort(key=lambda item: str(item.get("createdAt") or ""))
-    return merged_users[:effective_limit]
+    return local_users
 
 
 def append_user_audit_entry(
@@ -1072,21 +1340,16 @@ def append_user_audit_entry(
 ) -> None:
     changed_at = datetime.now().isoformat(timespec="seconds")
     changes_json = json.dumps(changes, ensure_ascii=False)
-    with open_db() as connection:
-        connection.execute(
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        client.execute(
             """
             INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (changed_at, actor, target_username, action, changes_json),
+            [changed_at, actor, target_username, action, changes_json],
         )
-    mirror_execute(
-        """
-        INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (changed_at, actor, target_username, action, changes_json),
-    )
+    _local_append_user_audit(changed_at, actor, target_username, action, changes_json)
 
 
 def list_user_audit_entries(limit: int = 20) -> list[dict[str, Any]]:
@@ -1102,7 +1365,8 @@ def list_user_audit_entries(limit: int = 20) -> list[dict[str, Any]]:
             for row in rows
         ]
 
-    if d1_client() is not None and prefer_d1_reads():
+    client = d1_client()
+    if client is not None:
         selected_rows = mirror_fetch_all(
             """
             SELECT changed_at, actor, target_username, action, changes_json
@@ -1113,19 +1377,10 @@ def list_user_audit_entries(limit: int = 20) -> list[dict[str, Any]]:
             (max(1, int(limit)),),
         )
         if selected_rows:
+            _local_replace_user_audit(list(reversed(selected_rows)))
             return normalize(selected_rows)
     if not APP_DB_PATH.exists():
-        return normalize(
-            mirror_fetch_all(
-                """
-                SELECT changed_at, actor, target_username, action, changes_json
-                FROM user_audit
-                ORDER BY changed_at DESC
-                LIMIT ?
-                """,
-                (max(1, int(limit)),),
-            )
-        )
+        return []
     with open_db() as connection:
         rows = connection.execute(
             """
@@ -1136,18 +1391,7 @@ def list_user_audit_entries(limit: int = 20) -> list[dict[str, Any]]:
             """,
             (max(1, int(limit)),),
         ).fetchall()
-    selected_rows: Any = rows
-    if not selected_rows:
-        selected_rows = mirror_fetch_all(
-            """
-            SELECT changed_at, actor, target_username, action, changes_json
-            FROM user_audit
-            ORDER BY changed_at DESC
-            LIMIT ?
-            """,
-            (max(1, int(limit)),),
-        )
-    return normalize(selected_rows)
+    return normalize(rows)
 
 
 def create_user(
@@ -1164,21 +1408,19 @@ def create_user(
         raise ValueError("Nome de usuário é obrigatório.")
     now = datetime.now().isoformat(timespec="seconds")
     user_id = uuid4().hex
-    with open_db() as connection:
-        existing = connection.execute(
-            "SELECT 1 FROM users WHERE username = ?",
-            (normalized_username,),
-        ).fetchone()
-        if existing is not None:
-            raise ValueError("Usuário já existe.")
-        connection.execute(
+    existing = load_user_by_username(normalized_username)
+    if existing is not None:
+        raise ValueError("Usuário já existe.")
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        client.execute(
             """
             INSERT INTO users (
                 id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
+            [
                 user_id,
                 normalized_username,
                 email,
@@ -1188,26 +1430,18 @@ def create_user(
                 1 if is_active else 0,
                 now,
                 now,
-            ),
+            ],
         )
-    mirror_execute(
-        """
-        INSERT INTO users (
-            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            normalized_username,
-            email,
-            display_name,
-            password_hash,
-            role,
-            1 if is_active else 0,
-            now,
-            now,
-        ),
+    _local_upsert_user_row(
+        user_id=user_id,
+        username=normalized_username,
+        email=email,
+        display_name=display_name,
+        password_hash=password_hash,
+        role=role,
+        is_active=is_active,
+        created_at=now,
+        updated_at=now,
     )
     return load_user_by_username(normalized_username) or {}
 
@@ -1226,68 +1460,46 @@ def upsert_user(
         raise ValueError("Nome de usuário é obrigatório.")
     existing = load_user_by_username(normalized_username)
     now = datetime.now().isoformat(timespec="seconds")
-    with open_db() as connection:
-        if existing is None:
-            connection.execute(
-                """
-                INSERT INTO users (
-                    id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    uuid4().hex,
-                    normalized_username,
-                    email,
-                    display_name,
-                    password_hash,
-                    role,
-                    1 if is_active else 0,
-                    now,
-                    now,
-                ),
+    user_id = existing.get("id") if existing else uuid4().hex
+    created_at = existing.get("createdAt") if existing else now
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        client.execute(
+            """
+            INSERT INTO users (
+                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
             )
-        else:
-            connection.execute(
-                """
-                UPDATE users
-                SET email = ?, display_name = ?, password_hash = ?, role = ?, is_active = ?, updated_at = ?
-                WHERE username = ?
-                """,
-                (
-                    email,
-                    display_name,
-                    password_hash,
-                    role,
-                    1 if is_active else 0,
-                    now,
-                    normalized_username,
-                ),
-            )
-    mirror_execute(
-        """
-        INSERT INTO users (
-            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                id = excluded.id,
+                email = excluded.email,
+                display_name = excluded.display_name,
+                password_hash = excluded.password_hash,
+                role = excluded.role,
+                is_active = excluded.is_active,
+                updated_at = excluded.updated_at
+            """,
+            [
+                user_id,
+                normalized_username,
+                email,
+                display_name,
+                password_hash,
+                role,
+                1 if is_active else 0,
+                created_at,
+                now,
+            ],
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(username) DO UPDATE SET
-            email = excluded.email,
-            display_name = excluded.display_name,
-            password_hash = excluded.password_hash,
-            role = excluded.role,
-            is_active = excluded.is_active,
-            updated_at = excluded.updated_at
-        """,
-        (
-            existing.get("id") if existing else uuid4().hex,
-            normalized_username,
-            email,
-            display_name,
-            password_hash,
-            role,
-            1 if is_active else 0,
-            existing.get("createdAt") if existing else now,
-            now,
-        ),
+    _local_upsert_user_row(
+        user_id=user_id,
+        username=normalized_username,
+        email=email,
+        display_name=display_name,
+        password_hash=password_hash,
+        role=role,
+        is_active=is_active,
+        created_at=created_at,
+        updated_at=now,
     )
     return load_user_by_username(normalized_username) or {}

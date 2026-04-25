@@ -14,7 +14,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from conferir_ponto.persistence import create_user
+from conferir_ponto.persistence import create_user, hydrate_local_cache_from_d1
 import conferir_ponto.persistence as persistence_module
 from conferir_ponto.storage import LocalReportStorage, storage_from_env
 from conferir_ponto.web import REPORTS, app, hash_password, sanitize_download_name
@@ -433,7 +433,7 @@ class WebAppTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
                 "conferir_ponto.persistence.mirror_execute"
-            ) as mocked_mirror_execute, patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+            ), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
                 create_user(
                     username="operador",
                     password_hash=hash_password("senha123"),
@@ -445,14 +445,12 @@ class WebAppTests(unittest.TestCase):
                     user = persistence_module.load_user_by_username("operador")
 
                 self.assertEqual(user["username"], "operador")
-                self.assertTrue(mocked_mirror_execute.called)
-                self.assertIn("INSERT INTO users", mocked_mirror_execute.call_args.args[0])
 
     def test_list_users_keeps_local_user_visible_when_d1_is_missing_it(self):
         with TemporaryDirectory() as temp_dir:
             with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
                 "conferir_ponto.persistence.mirror_execute"
-            ) as mocked_mirror_execute, patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+            ), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
                 create_user(
                     username="operador",
                     password_hash=hash_password("senha123"),
@@ -465,7 +463,61 @@ class WebAppTests(unittest.TestCase):
 
                 self.assertEqual(len(items), 1)
                 self.assertEqual(items[0]["username"], "operador")
-                self.assertTrue(mocked_mirror_execute.called)
+
+    def test_hydrate_local_cache_from_d1_populates_users_from_remote_primary(self):
+        class FakeD1Client:
+            def query(self, sql, params=None):
+                normalized = " ".join(str(sql).split()).lower()
+                if "from settings_current" in normalized:
+                    return []
+                if "from settings_audit" in normalized:
+                    return []
+                if "from reports" in normalized:
+                    return []
+                if "from user_audit" in normalized:
+                    return []
+                if "from users" in normalized:
+                    return [
+                        {
+                            "id": "uuid-user-1",
+                            "username": "operador",
+                            "email": "operador@example.com",
+                            "display_name": "Operador",
+                            "password_hash": "hash-1",
+                            "role": "user",
+                            "is_active": 1,
+                            "created_at": "2026-04-25T09:00:00",
+                            "updated_at": "2026-04-25T09:00:00",
+                        },
+                        {
+                            "id": "uuid-user-2",
+                            "username": "admin2",
+                            "email": "admin2@example.com",
+                            "display_name": "Admin Dois",
+                            "password_hash": "hash-2",
+                            "role": "admin",
+                            "is_active": 1,
+                            "created_at": "2026-04-25T09:05:00",
+                            "updated_at": "2026-04-25T09:05:00",
+                        },
+                    ]
+                return []
+
+            def execute(self, sql, params=None):
+                return None
+
+            def ensure_schema(self, *, force=False):
+                return None
+
+        persistence_module._D1_CLIENT = FakeD1Client()
+
+        summary = hydrate_local_cache_from_d1()
+        items = persistence_module.list_users()
+
+        self.assertEqual(summary["users"], 2)
+        self.assertEqual(len(items), 2)
+        self.assertEqual(items[0]["id"], "uuid-user-1")
+        self.assertEqual(items[1]["id"], "uuid-user-2")
 
     def test_admin_can_inspect_persistence_status(self):
         client = TestClient(app)
@@ -526,7 +578,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.15.2")
+        self.assertEqual(response.json()["version"], "1.16.0")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
@@ -1024,16 +1076,26 @@ class WebHelpersTests(unittest.TestCase):
         self.assertEqual(storage.backend_name, "r2")
 
     def test_update_user_uses_upsert_for_d1_mirror(self):
+        class FakeD1Client:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, params=None):
+                self.calls.append((sql, params))
+
+            def ensure_schema(self, *, force=False):
+                return None
+
         with TemporaryDirectory() as temp_dir:
-            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
-                "conferir_ponto.persistence.mirror_execute"
-            ) as mocked_mirror_execute:
+            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"):
                 create_user(
                     username="operador",
                     password_hash=hash_password("senha123"),
                     role="user",
                     display_name="Operador",
                 )
+                fake_d1 = FakeD1Client()
+                persistence_module._D1_CLIENT = fake_d1
 
                 persistence_module.update_user(
                     "operador",
@@ -1041,7 +1103,7 @@ class WebHelpersTests(unittest.TestCase):
                     display_name="Operador Lider",
                 )
 
-        sql = mocked_mirror_execute.call_args_list[-1].args[0]
+        sql = fake_d1.calls[-1][0]
         self.assertIn("ON CONFLICT(username) DO UPDATE", sql)
 
 

@@ -23,6 +23,7 @@ from conferir_ponto.persistence import (
     create_user,
     delete_report_record,
     d1_status,
+    hydrate_local_cache_from_d1,
     list_user_audit_entries,
     list_users,
     list_recent_report_records,
@@ -56,7 +57,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.15.2"
+APP_VERSION = "1.16.0"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 APP_SESSION_COOKIE = "agent_app_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -91,6 +92,16 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 REPORTS: OrderedDict[str, dict[str, Any]] = OrderedDict()
 LOGGER = logging.getLogger("conferir_ponto.web")
 _REPORT_STORAGE: ReportStorage | None = None
+
+
+@app.on_event("startup")
+async def hydrate_persistence_cache() -> None:
+    try:
+        summary = hydrate_local_cache_from_d1()
+        if any(summary.values()):
+            LOGGER.info("d1_local_cache_hydrated", extra=summary)
+    except Exception as exc:
+        LOGGER.warning("d1_local_cache_hydration_failed", extra={"error": str(exc)})
 
 
 @app.exception_handler(Exception)
