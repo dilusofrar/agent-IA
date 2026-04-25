@@ -671,6 +671,12 @@ def mirror_execute(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> None:
         LOGGER.warning("d1_mirror_execute_failed", extra={"error": str(exc), "sql": sql})
 
 
+def best_effort_d1_write(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> None:
+    client = d1_client()
+    if client is not None and hasattr(client, "execute"):
+        mirror_execute(sql, params)
+
+
 def mirror_fetch_one(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> dict[str, Any] | None:
     try:
         rows = _retry_d1_with_schema(
@@ -838,18 +844,16 @@ def sync_local_state_to_d1() -> dict[str, int]:
 def save_current_settings_payload(payload: dict[str, Any]) -> None:
     updated_at = datetime.now().isoformat(timespec="seconds")
     payload_json = json.dumps(payload, ensure_ascii=False)
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute(
-            """
-            INSERT INTO settings_current (scope, payload_json, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(scope) DO UPDATE SET
-                payload_json = excluded.payload_json,
-                updated_at = excluded.updated_at
-            """,
-            ["global", payload_json, updated_at],
-        )
+    best_effort_d1_write(
+        """
+        INSERT INTO settings_current (scope, payload_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(scope) DO UPDATE SET
+            payload_json = excluded.payload_json,
+            updated_at = excluded.updated_at
+        """,
+        ["global", payload_json, updated_at],
+    )
     _local_upsert_settings_current("global", payload_json, updated_at)
 
 
@@ -892,15 +896,13 @@ def load_current_settings_payload() -> dict[str, Any] | None:
 def append_settings_audit_entry(entry: dict[str, Any]) -> None:
     changes_json = json.dumps(entry.get("changes", []), ensure_ascii=False)
     settings_json = json.dumps(entry.get("settings", {}), ensure_ascii=False)
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute(
-            """
-            INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
-            VALUES (?, ?, ?, ?)
-            """,
-            [entry["changedAt"], entry["actor"], changes_json, settings_json],
-        )
+    best_effort_d1_write(
+        """
+        INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
+        VALUES (?, ?, ?, ?)
+        """,
+        [entry["changedAt"], entry["actor"], changes_json, settings_json],
+    )
     with open_db() as connection:
         connection.execute(
             """
@@ -1005,65 +1007,63 @@ def upsert_report_record(
     )
     recent_json = json.dumps(recent, ensure_ascii=False)
     payload_json = json.dumps(payload, ensure_ascii=False)
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute(
-            """
-            INSERT INTO reports (
-                report_id,
-                filename,
-                employee_name,
-                owner_user_id,
-                owner_username,
-                period_start,
-                period_end,
-                processed_at,
-                created_at,
-                processing_duration_ms,
-                recent_json,
-                payload_json,
-                source_pdf_key,
-                export_pdf_key,
-                source_pdf_path,
-                export_pdf_path
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(report_id) DO UPDATE SET
-                filename = excluded.filename,
-                employee_name = excluded.employee_name,
-                owner_user_id = excluded.owner_user_id,
-                owner_username = excluded.owner_username,
-                period_start = excluded.period_start,
-                period_end = excluded.period_end,
-                processed_at = excluded.processed_at,
-                created_at = excluded.created_at,
-                processing_duration_ms = excluded.processing_duration_ms,
-                recent_json = excluded.recent_json,
-                payload_json = excluded.payload_json,
-                source_pdf_key = excluded.source_pdf_key,
-                export_pdf_key = excluded.export_pdf_key,
-                source_pdf_path = excluded.source_pdf_path,
-                export_pdf_path = excluded.export_pdf_path
-            """,
-            [
-                report_id,
-                filename,
-                payload.get("employeeName"),
-                owner_user_id,
-                owner_username,
-                payload.get("periodStart"),
-                payload.get("periodEnd"),
-                payload.get("processedAt"),
-                created_at,
-                payload.get("meta", {}).get("processingDurationMs"),
-                recent_json,
-                payload_json,
-                source_pdf_key,
-                export_pdf_key,
-                source_pdf_path,
-                export_pdf_path,
-            ],
+    best_effort_d1_write(
+        """
+        INSERT INTO reports (
+            report_id,
+            filename,
+            employee_name,
+            owner_user_id,
+            owner_username,
+            period_start,
+            period_end,
+            processed_at,
+            created_at,
+            processing_duration_ms,
+            recent_json,
+            payload_json,
+            source_pdf_key,
+            export_pdf_key,
+            source_pdf_path,
+            export_pdf_path
         )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(report_id) DO UPDATE SET
+            filename = excluded.filename,
+            employee_name = excluded.employee_name,
+            owner_user_id = excluded.owner_user_id,
+            owner_username = excluded.owner_username,
+            period_start = excluded.period_start,
+            period_end = excluded.period_end,
+            processed_at = excluded.processed_at,
+            created_at = excluded.created_at,
+            processing_duration_ms = excluded.processing_duration_ms,
+            recent_json = excluded.recent_json,
+            payload_json = excluded.payload_json,
+            source_pdf_key = excluded.source_pdf_key,
+            export_pdf_key = excluded.export_pdf_key,
+            source_pdf_path = excluded.source_pdf_path,
+            export_pdf_path = excluded.export_pdf_path
+        """,
+        [
+            report_id,
+            filename,
+            payload.get("employeeName"),
+            owner_user_id,
+            owner_username,
+            payload.get("periodStart"),
+            payload.get("periodEnd"),
+            payload.get("processedAt"),
+            created_at,
+            payload.get("meta", {}).get("processingDurationMs"),
+            recent_json,
+            payload_json,
+            source_pdf_key,
+            export_pdf_key,
+            source_pdf_path,
+            export_pdf_path,
+        ],
+    )
     _local_upsert_report_row(
         report_id=report_id,
         filename=filename,
@@ -1225,34 +1225,32 @@ def update_user(
     effective_display_name = display_name if display_name is not None else existing.get("displayName")
     effective_role = role if role is not None else existing.get("role")
     effective_is_active = bool(is_active if is_active is not None else existing.get("isActive"))
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute(
-            """
-            INSERT INTO users (
-                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(username) DO UPDATE SET
-                email = excluded.email,
-                display_name = excluded.display_name,
-                password_hash = excluded.password_hash,
-                role = excluded.role,
-                is_active = excluded.is_active,
-                updated_at = excluded.updated_at
-            """,
-            [
-                existing.get("id"),
-                normalized_username,
-                effective_email,
-                effective_display_name,
-                effective_password_hash,
-                effective_role,
-                1 if effective_is_active else 0,
-                existing.get("createdAt"),
-                now,
-            ],
+    best_effort_d1_write(
+        """
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
         )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+            email = excluded.email,
+            display_name = excluded.display_name,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            is_active = excluded.is_active,
+            updated_at = excluded.updated_at
+        """,
+        [
+            existing.get("id"),
+            normalized_username,
+            effective_email,
+            effective_display_name,
+            effective_password_hash,
+            effective_role,
+            1 if effective_is_active else 0,
+            existing.get("createdAt"),
+            now,
+        ],
+    )
     _local_upsert_user_row(
         user_id=existing.get("id"),
         username=normalized_username,
@@ -1297,9 +1295,7 @@ def stale_report_ids(max_records: int) -> list[str]:
 
 
 def delete_report_record(report_id: str) -> None:
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute("DELETE FROM reports WHERE report_id = ?", [report_id])
+    best_effort_d1_write("DELETE FROM reports WHERE report_id = ?", [report_id])
     if APP_DB_PATH.exists():
         with open_db() as connection:
             connection.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
@@ -1399,15 +1395,13 @@ def append_user_audit_entry(
 ) -> None:
     changed_at = datetime.now().isoformat(timespec="seconds")
     changes_json = json.dumps(changes, ensure_ascii=False)
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute(
-            """
-            INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [changed_at, actor, target_username, action, changes_json],
-        )
+    best_effort_d1_write(
+        """
+        INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [changed_at, actor, target_username, action, changes_json],
+    )
     _local_append_user_audit(changed_at, actor, target_username, action, changes_json)
 
 
@@ -1470,27 +1464,25 @@ def create_user(
     existing = load_user_by_username(normalized_username)
     if existing is not None:
         raise ValueError("Usuário já existe.")
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute(
-            """
-            INSERT INTO users (
-                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                user_id,
-                normalized_username,
-                email,
-                display_name,
-                password_hash,
-                role,
-                1 if is_active else 0,
-                now,
-                now,
-            ],
+    best_effort_d1_write(
+        """
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
         )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            user_id,
+            normalized_username,
+            email,
+            display_name,
+            password_hash,
+            role,
+            1 if is_active else 0,
+            now,
+            now,
+        ],
+    )
     _local_upsert_user_row(
         user_id=user_id,
         username=normalized_username,
@@ -1521,35 +1513,33 @@ def upsert_user(
     now = datetime.now().isoformat(timespec="seconds")
     user_id = existing.get("id") if existing else uuid4().hex
     created_at = existing.get("createdAt") if existing else now
-    client = d1_client()
-    if client is not None and hasattr(client, "execute"):
-        client.execute(
-            """
-            INSERT INTO users (
-                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(username) DO UPDATE SET
-                id = excluded.id,
-                email = excluded.email,
-                display_name = excluded.display_name,
-                password_hash = excluded.password_hash,
-                role = excluded.role,
-                is_active = excluded.is_active,
-                updated_at = excluded.updated_at
-            """,
-            [
-                user_id,
-                normalized_username,
-                email,
-                display_name,
-                password_hash,
-                role,
-                1 if is_active else 0,
-                created_at,
-                now,
-            ],
+    best_effort_d1_write(
+        """
+        INSERT INTO users (
+            id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
         )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET
+            id = excluded.id,
+            email = excluded.email,
+            display_name = excluded.display_name,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            is_active = excluded.is_active,
+            updated_at = excluded.updated_at
+        """,
+        [
+            user_id,
+            normalized_username,
+            email,
+            display_name,
+            password_hash,
+            role,
+            1 if is_active else 0,
+            created_at,
+            now,
+        ],
+    )
     _local_upsert_user_row(
         user_id=user_id,
         username=normalized_username,

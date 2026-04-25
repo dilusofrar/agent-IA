@@ -390,6 +390,34 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(payload["defaultSchedule"]["start"], "07:45")
         self.assertIn("0004", payload["journeySchedules"])
 
+    def test_admin_settings_load_even_when_d1_bootstrap_write_fails(self):
+        class FakeD1Client:
+            def query(self, sql, params=None):
+                normalized = " ".join(str(sql).split()).lower()
+                if "from settings_current" in normalized:
+                    return []
+                if "from settings_audit" in normalized:
+                    return []
+                return []
+
+            def execute(self, sql, params=None):
+                raise RuntimeError("D1 write failed")
+
+            def ensure_schema(self, *, force=False):
+                return None
+
+        persistence_module._D1_CLIENT = FakeD1Client()
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            response = client.get("/api/settings")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["defaultSchedule"]["start"], "07:45")
+        self.assertIn("0999", payload["journeySchedules"])
+
     def test_admin_settings_history_skips_invalid_d1_rows(self):
         class FakeD1Client:
             def query(self, sql, params=None):
@@ -671,7 +699,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.2")
+        self.assertEqual(response.json()["version"], "1.16.3")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
