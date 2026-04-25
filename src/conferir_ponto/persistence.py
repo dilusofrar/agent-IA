@@ -155,6 +155,16 @@ def d1_status() -> dict[str, Any]:
     }
 
 
+def _extract_count_value(row: Any) -> int:
+    if row is None:
+        return 0
+    raw_value = _row_value(row, "total", 0)
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _local_upsert_settings_current(scope: str, payload_json: str, updated_at: str) -> None:
     with open_db() as connection:
         connection.execute(
@@ -706,6 +716,32 @@ def mirror_fetch_all(sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list
         LOGGER.warning("d1_mirror_fetch_failed", extra={"error": str(exc), "sql": sql})
         return []
     return rows or []
+
+
+def persistence_record_counts() -> dict[str, Any]:
+    table_queries = {
+        "users": "SELECT COUNT(*) AS total FROM users",
+        "userAudit": "SELECT COUNT(*) AS total FROM user_audit",
+        "reports": "SELECT COUNT(*) AS total FROM reports",
+        "settingsCurrent": "SELECT COUNT(*) AS total FROM settings_current",
+        "settingsAudit": "SELECT COUNT(*) AS total FROM settings_audit",
+    }
+    d1_counts = {key: 0 for key in table_queries}
+    local_counts = {key: 0 for key in table_queries}
+
+    if d1_client() is not None:
+        for key, sql in table_queries.items():
+            d1_counts[key] = _extract_count_value(mirror_fetch_one(sql))
+
+    if APP_DB_PATH.exists():
+        with open_db() as connection:
+            for key, sql in table_queries.items():
+                local_counts[key] = _extract_count_value(connection.execute(sql).fetchone())
+
+    return {
+        "d1": d1_counts,
+        "sqlite": local_counts,
+    }
 
 
 def sync_local_state_to_d1() -> dict[str, int]:

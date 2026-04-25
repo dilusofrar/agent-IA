@@ -29,6 +29,7 @@ from conferir_ponto.persistence import (
     list_recent_report_records,
     load_report_record,
     load_user_by_username,
+    persistence_record_counts,
     persistence_backend_name,
     stale_report_ids,
     update_user,
@@ -56,7 +57,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.16.6"
+APP_VERSION = "1.16.7"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 APP_SESSION_COOKIE = "agent_app_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -301,6 +302,7 @@ async def admin_persistence_status(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             **d1_status(),
+            "recordCounts": persistence_record_counts(),
             "storageBackend": report_storage().backend_name,
         }
     )
@@ -316,6 +318,7 @@ async def admin_storage_diagnostics(request: Request) -> JSONResponse:
             "storage": diagnostics,
             "status": {
                 **d1_status(),
+                "recordCounts": persistence_record_counts(),
                 "storageBackend": report_storage().backend_name,
                 "storageProbe": diagnostics,
             },
@@ -333,7 +336,16 @@ async def admin_sync_d1(request: Request) -> JSONResponse:
         summary = hydrate_local_cache_from_d1()
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return JSONResponse({"synced": True, "summary": summary, "status": d1_status()})
+    return JSONResponse(
+        {
+            "synced": True,
+            "summary": summary,
+            "status": {
+                **d1_status(),
+                "recordCounts": persistence_record_counts(),
+            },
+        }
+    )
 
 
 @app.post("/api/admin/users")

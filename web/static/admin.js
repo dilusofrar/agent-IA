@@ -487,6 +487,9 @@
       return;
     }
     const storageProbe = status.storageProbe || null;
+    const recordCounts = status.recordCounts || {};
+    const d1Counts = recordCounts.d1 || {};
+    const sqliteCounts = recordCounts.sqlite || {};
     const cards = [
       summaryCard("Backend atual", status.backend || "sqlite", "Estado visto pelo healthcheck do app."),
       summaryCard("Storage ativo", status.storageBackend || "local", "Backend atual dos arquivos de relatório."),
@@ -494,6 +497,11 @@
       summaryCard("Leitura preferida", status.preferReads ? "D1" : "SQLite", "Quando ativo, o app lê primeiro do D1 e usa SQLite apenas como fallback/cache."),
       summaryCard("Database ID", status.databaseId || "—", "Identificador do banco D1 vinculado."),
       summaryCard("Account ID", status.accountId || "—", "Conta Cloudflare usada para a API do D1."),
+      summaryCard("Usuários no D1", String(d1Counts.users || 0), "Contas persistidas remotamente."),
+      summaryCard("Relatórios no D1", String(d1Counts.reports || 0), "Apurações armazenadas no banco principal."),
+      summaryCard("Regras atuais no D1", String(d1Counts.settingsCurrent || 0), "Escopos persistidos em settings_current."),
+      summaryCard("Auditoria no D1", String((d1Counts.settingsAudit || 0) + (d1Counts.userAudit || 0)), "Soma de settings_audit e user_audit."),
+      summaryCard("Cache SQLite", String(sqliteCounts.users || 0) + " usuários", "Espelho local hidratado a partir do D1."),
     ];
     if (storageProbe) {
       cards.push(
