@@ -647,6 +647,37 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(items[0]["id"], "uuid-user-1")
         self.assertEqual(items[1]["id"], "uuid-user-2")
 
+    def test_list_users_can_hydrate_local_cache_from_d1_rows(self):
+        class FakeD1Client:
+            def query(self, sql, params=None):
+                normalized = " ".join(str(sql).split()).lower()
+                if "from users" in normalized:
+                    return [
+                        {
+                            "id": "uuid-user-1",
+                            "username": "operador",
+                            "email": "operador@example.com",
+                            "display_name": "Operador",
+                            "password_hash": "hash-1",
+                            "role": "user",
+                            "is_active": 1,
+                            "created_at": "2026-04-25T09:00:00",
+                            "updated_at": "2026-04-25T09:00:00",
+                        }
+                    ]
+                return []
+
+            def execute(self, sql, params=None):
+                return None
+
+        persistence_module._D1_CLIENT = FakeD1Client()
+
+        items = persistence_module.list_users()
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["username"], "operador")
+        self.assertEqual(persistence_module.load_user_by_username("operador")["username"], "operador")
+
     def test_hydrate_local_cache_from_d1_recovers_when_user_audit_column_is_missing(self):
         class FakeD1Client:
             def __init__(self):
@@ -788,7 +819,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.5")
+        self.assertEqual(response.json()["version"], "1.16.6")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")

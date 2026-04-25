@@ -1366,7 +1366,7 @@ def list_users(limit: int = 100) -> list[dict[str, Any]]:
         }
 
     query = """
-        SELECT id, username, email, display_name, role, is_active, created_at, updated_at
+        SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
         FROM users
         ORDER BY created_at ASC
         LIMIT ?
