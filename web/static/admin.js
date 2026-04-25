@@ -490,6 +490,8 @@
     const recordCounts = status.recordCounts || {};
     const d1Counts = recordCounts.d1 || {};
     const sqliteCounts = recordCounts.sqlite || {};
+    const drift = status.drift || {};
+    const mismatches = Array.isArray(drift.mismatches) ? drift.mismatches : [];
     const cards = [
       summaryCard("Backend atual", status.backend || "sqlite", "Estado visto pelo healthcheck do app."),
       summaryCard("Storage ativo", status.storageBackend || "local", "Backend atual dos arquivos de relatório."),
@@ -502,6 +504,13 @@
       summaryCard("Regras atuais no D1", String(d1Counts.settingsCurrent || 0), "Escopos persistidos em settings_current."),
       summaryCard("Auditoria no D1", String((d1Counts.settingsAudit || 0) + (d1Counts.userAudit || 0)), "Soma de settings_audit e user_audit."),
       summaryCard("Cache SQLite", String(sqliteCounts.users || 0) + " usuários", "Espelho local hidratado a partir do D1."),
+      summaryCard(
+        "Sincronização",
+        drift.inSync ? "Alinhado" : "Divergente",
+        drift.inSync
+          ? "As contagens do cache local batem com o D1."
+          : buildDriftNote(mismatches),
+      ),
     ];
     if (storageProbe) {
       cards.push(
@@ -565,6 +574,17 @@
       createElement("span", { className: "insight-note", text: note }),
     );
     return card;
+  }
+
+  function buildDriftNote(mismatches) {
+    if (!mismatches.length) {
+      return "Sem divergências detectadas.";
+    }
+    return mismatches
+      .map(function (item) {
+        return item.table + " D1 " + item.d1 + " / SQLite " + item.sqlite;
+      })
+      .join(" · ");
   }
 
   function populateJourneySchedule(code, settings) {

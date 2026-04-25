@@ -753,6 +753,10 @@ class WebAppTests(unittest.TestCase):
         )
         self.assertIn("sqlite", response.json()["recordCounts"])
         self.assertGreaterEqual(response.json()["recordCounts"]["sqlite"]["users"], 0)
+        self.assertIn("inSync", response.json()["drift"])
+        self.assertIn("mismatchCount", response.json()["drift"])
+        self.assertIn("mismatches", response.json()["drift"])
+        self.assertGreaterEqual(response.json()["drift"]["mismatchCount"], 0)
 
     def test_admin_can_run_storage_diagnostics(self):
         class FakeStorage:
@@ -831,7 +835,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.7")
+        self.assertEqual(response.json()["version"], "1.16.8")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")

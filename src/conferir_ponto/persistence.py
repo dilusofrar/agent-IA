@@ -744,6 +744,29 @@ def persistence_record_counts() -> dict[str, Any]:
     }
 
 
+def persistence_drift_summary() -> dict[str, Any]:
+    counts = persistence_record_counts()
+    d1_counts = counts["d1"]
+    sqlite_counts = counts["sqlite"]
+    mismatches = []
+
+    for key in d1_counts:
+        if int(d1_counts.get(key, 0)) != int(sqlite_counts.get(key, 0)):
+            mismatches.append(
+                {
+                    "table": key,
+                    "d1": int(d1_counts.get(key, 0)),
+                    "sqlite": int(sqlite_counts.get(key, 0)),
+                }
+            )
+
+    return {
+        "inSync": not mismatches,
+        "mismatchCount": len(mismatches),
+        "mismatches": mismatches,
+    }
+
+
 def sync_local_state_to_d1() -> dict[str, int]:
     client = d1_client()
     if client is None:
