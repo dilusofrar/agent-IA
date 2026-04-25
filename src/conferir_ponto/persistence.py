@@ -410,17 +410,17 @@ def hydrate_local_cache_from_d1() -> dict[str, int]:
     if client is None:
         return {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0, "userAudit": 0}
     ensure_app_db()
-    settings_rows = client.query(
+    settings_rows = mirror_fetch_all(
         "SELECT scope, payload_json, updated_at FROM settings_current"
     )
-    settings_audit_rows = client.query(
+    settings_audit_rows = mirror_fetch_all(
         """
         SELECT changed_at, actor, changes_json, settings_json
         FROM settings_audit
         ORDER BY changed_at ASC
         """
     )
-    report_rows = client.query(
+    report_rows = mirror_fetch_all(
         """
         SELECT report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
                processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
@@ -429,14 +429,14 @@ def hydrate_local_cache_from_d1() -> dict[str, int]:
         ORDER BY created_at ASC
         """
     )
-    user_rows = client.query(
+    user_rows = mirror_fetch_all(
         """
         SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
         FROM users
         ORDER BY created_at ASC
         """
     )
-    user_audit_rows = client.query(
+    user_audit_rows = mirror_fetch_all(
         """
         SELECT changed_at, actor, target_username, action, changes_json
         FROM user_audit

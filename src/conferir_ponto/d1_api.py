@@ -37,6 +37,11 @@ def _is_duplicate_column_error(exc: Exception) -> bool:
     return "duplicate column name" in message or "already exists" in message
 
 
+def _is_existing_schema_object_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "already exists" in message
+
+
 class D1ApiClient:
     def __init__(
         self,
@@ -77,10 +82,12 @@ class D1ApiClient:
         ]
         if not statements:
             return
-        self._post(
-            "/query",
-            {"batch": [{"sql": statement} for statement in statements]},
-        )
+        for statement in statements:
+            try:
+                self.execute(statement)
+            except RuntimeError as exc:
+                if not _is_existing_schema_object_error(exc):
+                    raise
 
     def ensure_schema(self, *, force: bool = False) -> None:
         if (self._schema_ensured and not force) or not D1_SCHEMA_PATH.exists():

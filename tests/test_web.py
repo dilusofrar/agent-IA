@@ -647,6 +647,58 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(items[0]["id"], "uuid-user-1")
         self.assertEqual(items[1]["id"], "uuid-user-2")
 
+    def test_hydrate_local_cache_from_d1_recovers_when_user_audit_column_is_missing(self):
+        class FakeD1Client:
+            def __init__(self):
+                self.user_audit_calls = 0
+                self.ensure_calls = 0
+
+            def query(self, sql, params=None):
+                normalized = " ".join(str(sql).split()).lower()
+                if "from settings_current" in normalized:
+                    return []
+                if "from settings_audit" in normalized:
+                    return []
+                if "from reports" in normalized:
+                    return []
+                if "from users" in normalized:
+                    return [
+                        {
+                            "id": "uuid-user-1",
+                            "username": "operador",
+                            "email": "operador@example.com",
+                            "display_name": "Operador",
+                            "password_hash": "hash",
+                            "role": "user",
+                            "is_active": 1,
+                            "created_at": "2026-04-25T00:00:00",
+                            "updated_at": "2026-04-25T00:00:00",
+                        }
+                    ]
+                if "from user_audit" in normalized:
+                    self.user_audit_calls += 1
+                    if self.user_audit_calls == 1:
+                        raise RuntimeError(
+                            'D1 HTTP error 400: {"messages":[],"result":[],"success":false,'
+                            '"errors":[{"code":7500,"message":"no such column: actor at offset 28: SQLITE_ERROR"}]}'
+                        )
+                    return []
+                return []
+
+            def ensure_schema(self, *, force=False):
+                self.ensure_calls += 1
+
+        fake_d1 = FakeD1Client()
+        persistence_module._D1_CLIENT = fake_d1
+
+        summary = hydrate_local_cache_from_d1()
+        items = persistence_module.list_users()
+
+        self.assertEqual(summary["users"], 1)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["username"], "operador")
+        self.assertEqual(fake_d1.ensure_calls, 1)
+
     def test_admin_can_inspect_persistence_status(self):
         client = TestClient(app)
 
@@ -736,7 +788,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.4")
+        self.assertEqual(response.json()["version"], "1.16.5")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
@@ -1219,6 +1271,25 @@ class WebHelpersTests(unittest.TestCase):
 
         mocked_script.assert_called_once()
         self.assertTrue(any("ALTER TABLE settings_audit ADD COLUMN actor TEXT" in sql for sql in calls))
+        self.assertTrue(any("ALTER TABLE user_audit ADD COLUMN actor TEXT" in sql for sql in calls))
+
+    def test_d1_client_ensure_schema_ignores_existing_tables_and_indexes(self):
+        client = D1ApiClient(
+            account_id="acc",
+            database_id="db",
+            api_token="token",
+        )
+        calls = []
+
+        def fake_execute(sql, params=None):
+            calls.append(sql)
+            normalized = str(sql).lower()
+            if "create table reports" in normalized or "create index idx_reports_created_at" in normalized:
+                raise RuntimeError("table reports already exists")
+
+        with patch.object(client, "execute", side_effect=fake_execute):
+            client.ensure_schema(force=True)
+
         self.assertTrue(any("ALTER TABLE user_audit ADD COLUMN actor TEXT" in sql for sql in calls))
 
     def test_sanitize_download_name_removes_unsafe_characters(self):
