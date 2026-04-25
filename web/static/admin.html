@@ -346,13 +346,13 @@
           <div class="panel-head panel-head-inline">
               <div>
                 <h3>Status do D1 e R2</h3>
-                <p class="muted">Use a sincronização para o D1 e rode um teste real de gravação no storage para validar o bucket do R2.</p>
+                <p class="muted">Use a sincronização para hidratar o cache local a partir do D1 e rode um teste real de gravação no storage para validar o bucket do R2.</p>
               </div>
             </div>
             <div id="admin-persistence-summary" class="insights-grid"></div>
             <div class="admin-actions">
               <button id="admin-storage-check" type="button" class="btn btn-secondary">Testar escrita no R2</button>
-              <button id="admin-d1-sync" type="button" class="btn btn-primary">Sincronizar SQLite para D1</button>
+              <button id="admin-d1-sync" type="button" class="btn btn-primary">Sincronizar D1 para SQLite</button>
             </div>
           <div id="admin-persistence-status" class="status" role="status" aria-live="polite" hidden></div>
         </section>
@@ -361,7 +361,7 @@
           <div class="panel-head panel-head-inline">
             <div>
               <h3>Resumo da sincronização</h3>
-              <p class="muted">Quando o D1 estiver ativo, este painel mostra o backend atual e quantos registros foram espelhados.</p>
+                <p class="muted">Quando o D1 estiver ativo, este painel mostra o backend atual e o resultado da hidratação do cache local.</p>
             </div>
           </div>
           <pre id="admin-persistence-json" class="admin-persistence-json">Aguardando configuração do D1.</pre>

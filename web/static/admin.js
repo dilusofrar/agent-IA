@@ -142,7 +142,11 @@
         throw new Error(payload.detail || "Falha ao carregar persistência.");
       }
       renderPersistenceStatus(payload);
-      setStatus(persistenceStatus, payload.enabled ? "success" : "error", payload.enabled ? "D1 pronto para sincronização." : "D1 ainda não configurado.");
+      setStatus(
+        persistenceStatus,
+        payload.enabled ? "success" : "error",
+        payload.enabled ? "D1 pronto para hidratar o cache SQLite." : "D1 ainda não configurado.",
+      );
     } catch (error) {
       setStatus(persistenceStatus, "error", error.message || "Falha ao carregar persistência.");
     }
@@ -244,20 +248,20 @@
   }
 
   async function handleD1Sync() {
-    setStatus(persistenceStatus, "loading", "Sincronizando base local para o D1...");
+    setStatus(persistenceStatus, "loading", "Sincronizando dados do D1 para o cache SQLite...");
     try {
       const response = await fetch("/api/admin/persistence/sync-d1", { method: "POST" });
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload.detail || "Falha ao sincronizar D1.");
+        throw new Error(payload.detail || "Falha ao sincronizar D1 para SQLite.");
       }
       renderPersistenceStatus(payload.status || {});
       if (persistenceJson) {
         persistenceJson.textContent = JSON.stringify(payload, null, 2);
       }
-      setStatus(persistenceStatus, "success", "Sincronização concluída com sucesso.");
+      setStatus(persistenceStatus, "success", "Sincronização do D1 para SQLite concluída com sucesso.");
     } catch (error) {
-      setStatus(persistenceStatus, "error", error.message || "Falha ao sincronizar D1.");
+      setStatus(persistenceStatus, "error", error.message || "Falha ao sincronizar D1 para SQLite.");
     }
   }
 
@@ -487,7 +491,7 @@
       summaryCard("Backend atual", status.backend || "sqlite", "Estado visto pelo healthcheck do app."),
       summaryCard("Storage ativo", status.storageBackend || "local", "Backend atual dos arquivos de relatório."),
       summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando as variáveis D1 estão configuradas no Render."),
-      summaryCard("Leitura preferida", status.preferReads ? "D1" : "SQLite", "Quando ativo, o app lê primeiro do D1 e usa SQLite como fallback."),
+      summaryCard("Leitura preferida", status.preferReads ? "D1" : "SQLite", "Quando ativo, o app lê primeiro do D1 e usa SQLite apenas como fallback/cache."),
       summaryCard("Database ID", status.databaseId || "—", "Identificador do banco D1 vinculado."),
       summaryCard("Account ID", status.accountId || "—", "Conta Cloudflare usada para a API do D1."),
     ];
