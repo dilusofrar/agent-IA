@@ -549,6 +549,29 @@ def _is_missing_d1_table_error(exc: Exception) -> bool:
     return "no such table" in message and "sqlite_error" in message
 
 
+def _load_json_payload(raw_value: str | None, *, context: str) -> Any | None:
+    if raw_value in {None, ""}:
+        return None
+    try:
+        return json.loads(raw_value)
+    except (TypeError, json.JSONDecodeError) as exc:
+        LOGGER.warning(
+            "persistence_json_decode_failed",
+            extra={"context": context, "error": str(exc)},
+        )
+        return None
+
+
+def _row_value(row: Any, key: str, default: Any = None) -> Any:
+    if row is None:
+        return default
+    if hasattr(row, "keys") and key in row.keys():
+        return row[key]
+    if isinstance(row, dict):
+        return row.get(key, default)
+    return default
+
+
 def _row_to_user(row: Any) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -816,7 +839,7 @@ def save_current_settings_payload(payload: dict[str, Any]) -> None:
     updated_at = datetime.now().isoformat(timespec="seconds")
     payload_json = json.dumps(payload, ensure_ascii=False)
     client = d1_client()
-    if client is not None:
+    if client is not None and hasattr(client, "execute"):
         client.execute(
             """
             INSERT INTO settings_current (scope, payload_json, updated_at)
@@ -838,12 +861,17 @@ def load_current_settings_payload() -> dict[str, Any] | None:
             ("global",),
         )
         if d1_row is not None:
-            _local_upsert_settings_current(
-                "global",
-                d1_row["payload_json"],
-                d1_row.get("updated_at") or datetime.now().isoformat(timespec="seconds"),
+            decoded_payload = _load_json_payload(
+                d1_row.get("payload_json"),
+                context="d1.settings_current.global",
             )
-            return json.loads(d1_row["payload_json"])
+            if isinstance(decoded_payload, dict):
+                _local_upsert_settings_current(
+                    "global",
+                    d1_row["payload_json"],
+                    d1_row.get("updated_at") or datetime.now().isoformat(timespec="seconds"),
+                )
+                return decoded_payload
     if not APP_DB_PATH.exists():
         return None
     with open_db() as connection:
@@ -852,7 +880,12 @@ def load_current_settings_payload() -> dict[str, Any] | None:
             ("global",),
         ).fetchone()
     if row is not None:
-        return json.loads(row["payload_json"])
+        decoded_payload = _load_json_payload(
+            row["payload_json"],
+            context="sqlite.settings_current.global",
+        )
+        if isinstance(decoded_payload, dict):
+            return decoded_payload
     return None
 
 
@@ -878,6 +911,39 @@ def append_settings_audit_entry(entry: dict[str, Any]) -> None:
         )
 
 
+def _normalize_settings_audit_rows(rows: list[Any], *, context: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_items: list[dict[str, Any]] = []
+    valid_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        changes = _load_json_payload(
+            _row_value(row, "changes_json"),
+            context=f"{context}[{index}].changes_json",
+        )
+        settings = _load_json_payload(
+            _row_value(row, "settings_json"),
+            context=f"{context}[{index}].settings_json",
+        )
+        if not isinstance(changes, list) or not isinstance(settings, dict):
+            continue
+        normalized_items.append(
+            {
+                "changedAt": _row_value(row, "changed_at"),
+                "actor": _row_value(row, "actor"),
+                "changes": changes,
+                "settings": settings,
+            }
+        )
+        valid_rows.append(
+            {
+                "changed_at": _row_value(row, "changed_at"),
+                "actor": _row_value(row, "actor"),
+                "changes_json": _row_value(row, "changes_json"),
+                "settings_json": _row_value(row, "settings_json"),
+            }
+        )
+    return normalized_items, valid_rows
+
+
 def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
     client = d1_client()
     if client is not None:
@@ -891,16 +957,13 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
             (max(0, int(limit)),),
         )
         if d1_rows:
-            _local_replace_settings_audit(list(reversed(d1_rows)))
-            return [
-                {
-                    "changedAt": row["changed_at"],
-                    "actor": row["actor"],
-                    "changes": json.loads(row["changes_json"]),
-                    "settings": json.loads(row["settings_json"]),
-                }
-                for row in d1_rows
-            ]
+            normalized_items, valid_rows = _normalize_settings_audit_rows(
+                d1_rows,
+                context="d1.settings_audit",
+            )
+            if normalized_items:
+                _local_replace_settings_audit(list(reversed(valid_rows)))
+                return normalized_items
     if not APP_DB_PATH.exists():
         return []
     with open_db() as connection:
@@ -914,15 +977,11 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
             (max(0, int(limit)),),
         ).fetchall()
     if rows:
-        return [
-            {
-                "changedAt": row["changed_at"],
-                "actor": row["actor"],
-                "changes": json.loads(row["changes_json"]),
-                "settings": json.loads(row["settings_json"]),
-            }
-            for row in rows
-        ]
+        normalized_items, _ = _normalize_settings_audit_rows(
+            rows,
+            context="sqlite.settings_audit",
+        )
+        return normalized_items
     return []
 
 

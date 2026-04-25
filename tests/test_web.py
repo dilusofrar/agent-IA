@@ -365,6 +365,69 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(fake_d1.ensure_calls, 1)
         self.assertEqual(fake_d1.query_calls, 2)
 
+    def test_admin_settings_fall_back_when_d1_current_payload_is_invalid_json(self):
+        class FakeD1Client:
+            def query(self, sql, params=None):
+                normalized = " ".join(str(sql).split()).lower()
+                if "from settings_current" in normalized:
+                    return [{"payload_json": '{"defaultSchedule":', "updated_at": "2026-04-25T03:00:00"}]
+                if "from settings_audit" in normalized:
+                    return []
+                return []
+
+            def ensure_schema(self, *, force=False):
+                return None
+
+        persistence_module._D1_CLIENT = FakeD1Client()
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            response = client.get("/api/settings")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["defaultSchedule"]["start"], "07:45")
+        self.assertIn("0004", payload["journeySchedules"])
+
+    def test_admin_settings_history_skips_invalid_d1_rows(self):
+        class FakeD1Client:
+            def query(self, sql, params=None):
+                normalized = " ".join(str(sql).split()).lower()
+                if "from settings_current" in normalized:
+                    return []
+                if "from settings_audit" in normalized:
+                    return [
+                        {
+                            "changed_at": "2026-04-25T03:00:00",
+                            "actor": "admin",
+                            "changes_json": '["Jornada alterada"]',
+                            "settings_json": '{"defaultSchedule":{"start":"07:45","lunchStart":"12:00","lunchEnd":"13:00","end":"17:00"}}',
+                        },
+                        {
+                            "changed_at": "2026-04-24T03:00:00",
+                            "actor": "admin",
+                            "changes_json": '["registro ruim"]',
+                            "settings_json": '{"defaultSchedule":',
+                        },
+                    ]
+                return []
+
+            def ensure_schema(self, *, force=False):
+                return None
+
+        persistence_module._D1_CLIENT = FakeD1Client()
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
+            self.login_admin(client)
+            response = client.get("/api/settings/history")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["items"][0]["actor"], "admin")
+
     def test_admin_can_update_existing_user(self):
         client = TestClient(app)
 
@@ -578,7 +641,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.0")
+        self.assertEqual(response.json()["version"], "1.16.1")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
