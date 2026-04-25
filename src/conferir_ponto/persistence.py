@@ -544,9 +544,12 @@ def hydrate_local_cache_from_d1() -> dict[str, int]:
     }
 
 
-def _is_missing_d1_table_error(exc: Exception) -> bool:
+def _is_missing_d1_schema_error(exc: Exception) -> bool:
     message = str(exc).lower()
-    return "no such table" in message and "sqlite_error" in message
+    return (
+        "sqlite_error" in message
+        and ("no such table" in message or "no such column" in message)
+    )
 
 
 def _load_json_payload(raw_value: str | None, *, context: str) -> Any | None:
@@ -650,10 +653,10 @@ def _retry_d1_with_schema(
     try:
         return callback(client)
     except Exception as exc:
-        if not _is_missing_d1_table_error(exc):
+        if not _is_missing_d1_schema_error(exc):
             raise
         LOGGER.warning(
-            "d1_schema_retry_after_missing_table",
+            "d1_schema_retry_after_missing_object",
             extra={"error": str(exc), "sql": sql, "operation": operation_name},
         )
         client.ensure_schema(force=True)

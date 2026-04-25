@@ -10,12 +10,31 @@ from urllib.request import Request, urlopen
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 D1_SCHEMA_PATH = BASE_DIR / "docs" / "d1-schema.sql"
+D1_MIGRATIONS = (
+    "ALTER TABLE reports ADD COLUMN owner_user_id TEXT",
+    "ALTER TABLE reports ADD COLUMN owner_username TEXT",
+    "ALTER TABLE reports ADD COLUMN source_pdf_key TEXT",
+    "ALTER TABLE reports ADD COLUMN export_pdf_key TEXT",
+    "ALTER TABLE reports ADD COLUMN source_pdf_path TEXT",
+    "ALTER TABLE reports ADD COLUMN export_pdf_path TEXT",
+    "ALTER TABLE settings_audit ADD COLUMN actor TEXT",
+    "ALTER TABLE settings_audit ADD COLUMN settings_json TEXT",
+    "ALTER TABLE user_audit ADD COLUMN actor TEXT",
+    "ALTER TABLE user_audit ADD COLUMN target_username TEXT",
+    "ALTER TABLE user_audit ADD COLUMN action TEXT",
+    "ALTER TABLE user_audit ADD COLUMN changes_json TEXT",
+)
 
 
 def _serialize_param(value: Any) -> Any:
     if isinstance(value, bool):
         return 1 if value else 0
     return value
+
+
+def _is_duplicate_column_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "duplicate column name" in message or "already exists" in message
 
 
 class D1ApiClient:
@@ -67,7 +86,16 @@ class D1ApiClient:
         if (self._schema_ensured and not force) or not D1_SCHEMA_PATH.exists():
             return
         self.execute_script(D1_SCHEMA_PATH.read_text(encoding="utf-8"))
+        self.apply_migrations()
         self._schema_ensured = True
+
+    def apply_migrations(self) -> None:
+        for statement in D1_MIGRATIONS:
+            try:
+                self.execute(statement)
+            except RuntimeError as exc:
+                if not _is_duplicate_column_error(exc):
+                    raise
 
     def _post(self, suffix: str, body: dict[str, Any]) -> dict[str, Any]:
         url = (

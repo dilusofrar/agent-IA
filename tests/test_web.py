@@ -16,6 +16,7 @@ if str(SRC_DIR) not in sys.path:
 
 from conferir_ponto.persistence import create_user, hydrate_local_cache_from_d1
 import conferir_ponto.persistence as persistence_module
+from conferir_ponto.d1_api import D1ApiClient
 from conferir_ponto.storage import LocalReportStorage, storage_from_env
 from conferir_ponto.web import REPORTS, app, hash_password, sanitize_download_name
 import conferir_ponto.web as web_module
@@ -365,6 +366,42 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(fake_d1.ensure_calls, 1)
         self.assertEqual(fake_d1.query_calls, 2)
 
+    def test_user_audit_history_recovers_after_d1_missing_column(self):
+        class FakeD1Client:
+            def __init__(self):
+                self.query_calls = 0
+                self.ensure_calls = 0
+
+            def query(self, sql, params):
+                self.query_calls += 1
+                if self.query_calls == 1:
+                    raise RuntimeError(
+                        'D1 HTTP error 400: {"messages":[],"result":[],"success":false,'
+                        '"errors":[{"code":7500,"message":"no such column: actor at offset 28: SQLITE_ERROR"}]}'
+                    )
+                return [
+                    {
+                        "changed_at": "2026-04-25T12:00:00",
+                        "actor": "admin",
+                        "target_username": "operador",
+                        "action": "update",
+                        "changes_json": '["Perfil alterado para admin"]',
+                    }
+                ]
+
+            def ensure_schema(self, *, force=False):
+                self.ensure_calls += 1
+
+        fake_d1 = FakeD1Client()
+        persistence_module._D1_CLIENT = fake_d1
+
+        items = persistence_module.list_user_audit_entries()
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["actor"], "admin")
+        self.assertEqual(fake_d1.ensure_calls, 1)
+        self.assertEqual(fake_d1.query_calls, 2)
+
     def test_admin_settings_fall_back_when_d1_current_payload_is_invalid_json(self):
         class FakeD1Client:
             def query(self, sql, params=None):
@@ -699,7 +736,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.3")
+        self.assertEqual(response.json()["version"], "1.16.4")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
@@ -1165,6 +1202,25 @@ class WebAppTests(unittest.TestCase):
 
 
 class WebHelpersTests(unittest.TestCase):
+    def test_d1_client_ensure_schema_applies_column_migrations(self):
+        client = D1ApiClient(
+            account_id="acc",
+            database_id="db",
+            api_token="token",
+        )
+        calls = []
+
+        with patch.object(client, "execute_script") as mocked_script, patch.object(
+            client,
+            "execute",
+            side_effect=lambda sql, params=None: calls.append(sql),
+        ):
+            client.ensure_schema(force=True)
+
+        mocked_script.assert_called_once()
+        self.assertTrue(any("ALTER TABLE settings_audit ADD COLUMN actor TEXT" in sql for sql in calls))
+        self.assertTrue(any("ALTER TABLE user_audit ADD COLUMN actor TEXT" in sql for sql in calls))
+
     def test_sanitize_download_name_removes_unsafe_characters(self):
         self.assertEqual(
             sanitize_download_name(' ../evil"\r\nname?.pdf '),
