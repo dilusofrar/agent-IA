@@ -635,13 +635,43 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("D1", response.json()["detail"])
 
+    def test_sync_d1_hydrates_local_cache_from_remote(self):
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch(
+            "conferir_ponto.web.d1_status",
+            return_value={
+                "enabled": True,
+                "backend": "sqlite+d1",
+                "preferReads": True,
+                "databaseId": "db-id",
+                "accountId": "account-id",
+            },
+        ), patch(
+            "conferir_ponto.web.hydrate_local_cache_from_d1",
+            return_value={
+                "settingsCurrent": 1,
+                "settingsAudit": 2,
+                "reports": 3,
+                "users": 4,
+                "userAudit": 5,
+            },
+        ) as mocked_hydrate:
+            self.login_admin(client)
+            response = client.post("/api/admin/persistence/sync-d1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["synced"])
+        self.assertEqual(response.json()["summary"]["users"], 4)
+        mocked_hydrate.assert_called_once()
+
     def test_healthcheck_returns_security_headers(self):
         client = TestClient(app)
 
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.1")
+        self.assertEqual(response.json()["version"], "1.16.2")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "sqlite")
         self.assertEqual(response.headers["x-frame-options"], "DENY")

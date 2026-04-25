@@ -30,7 +30,6 @@ from conferir_ponto.persistence import (
     load_report_record,
     load_user_by_username,
     persistence_backend_name,
-    sync_local_state_to_d1,
     stale_report_ids,
     update_user,
     upsert_user,
@@ -57,7 +56,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.16.1"
+APP_VERSION = "1.16.2"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 APP_SESSION_COOKIE = "agent_app_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -328,8 +327,10 @@ async def admin_storage_diagnostics(request: Request) -> JSONResponse:
 @app.post("/api/admin/persistence/sync-d1")
 async def admin_sync_d1(request: Request) -> JSONResponse:
     ensure_admin(request)
+    if not d1_status().get("enabled"):
+        raise HTTPException(status_code=400, detail="D1 não configurado.")
     try:
-        summary = sync_local_state_to_d1()
+        summary = hydrate_local_cache_from_d1()
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"synced": True, "summary": summary, "status": d1_status()})
