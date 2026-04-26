@@ -60,3 +60,19 @@ If any of these are missing, the app falls back to local storage automatically.
 The D1 API token needs at least `D1 Read` and `D1 Write` permissions on the target account, as described in the Cloudflare REST API docs:
 - [Create D1 Database](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/get/)
 - [Query D1 Database](https://developers.cloudflare.com/api/resources/d1/subresources/database/methods/query/)
+
+## Cloudflare Containers path
+
+This repository now also includes a Cloudflare Containers migration scaffold under
+`cloudflare/`, so the project can move from:
+
+- Render for compute
+
+to:
+
+- Cloudflare Worker as the public edge entrypoint
+- Cloudflare Container running the current Python/FastAPI app
+- D1 as the primary database
+- R2 as the primary object store
+
+See [cloudflare-containers-migration.md](/D:/diegoluks/CONFERIR%20PONTO/docs/cloudflare-containers-migration.md).

@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "agent-ia-ponto",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-25",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "PORT": "8000",
+    "PYTHONPATH": "/app/src",
+    "ENABLE_API_DOCS": "false",
+    "R2_REGION": "auto"
+  },
+  "containers": [
+    {
+      "class_name": "AgentIaPontoContainer",
+      "image": "../Dockerfile",
+      "image_build_context": "..",
+      "instance_type": "basic",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "APP_CONTAINER",
+        "class_name": "AgentIaPontoContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "AgentIaPontoContainer"
+      ]
+    }
+  ]
+}

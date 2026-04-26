@@ -10,3 +10,5 @@ data/uploads/
 data/reports/
 data/app.db
 data/settings/apuracao-history.jsonl
+cloudflare/node_modules/
+cloudflare/.wrangler/
