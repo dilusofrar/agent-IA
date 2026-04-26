@@ -9,7 +9,7 @@
     "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.0.36"
+    "@cloudflare/containers": "^0.0.28"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260423.0",
