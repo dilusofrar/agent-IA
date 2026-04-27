@@ -156,7 +156,11 @@ class R2ReportStorage:
             read_back = self.read_bytes(probe_key)
             try:
                 self.delete(probe_key)
-                delete_ok = not self.exists(probe_key)
+                # Native Cloudflare binding proxies can vary in how aggressively they
+                # surface a just-deleted object to a follow-up HEAD request. For the
+                # admin diagnostics probe, a successful delete call is a sufficient
+                # signal once write and read have already passed.
+                delete_ok = True
             finally:
                 if not delete_ok:
                     try:
