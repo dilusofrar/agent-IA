@@ -25,7 +25,7 @@
   ],
   "r2_buckets": [
     {
-      "binding": "rendflare_project1",
+      "binding": "R2",
       "bucket_name": "rendflare"
     }
   ],
