@@ -51,6 +51,58 @@ O projeto esta pronto para deploy com Docker. Os arquivos principais sao:
 - `.dockerignore`
 - `docker-compose.yml`
 - `render.yaml`
+- `cloudflare/wrangler.jsonc`
+
+### Cloudflare Containers
+
+O caminho principal de producao agora passa a ser Cloudflare:
+
+- Worker como borda publica
+- Container executando a aplicacao Python atual
+- D1 como banco principal
+- R2 como armazenamento principal
+
+Arquivos principais:
+
+- `cloudflare/wrangler.jsonc`
+- `cloudflare/src/index.ts`
+- `docs/cloudflare-containers-migration.md`
+
+Fluxo resumido:
+
+1. Ativar Workers Paid e Containers na conta
+2. Configurar o projeto com diretorio raiz `/cloudflare`
+3. Definir no build:
+
+```text
+CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ACCOUNT_ID
+```
+
+4. Definir em runtime os secrets do app:
+
+```text
+ADMIN_USERNAME
+ADMIN_PASSWORD
+ADMIN_SESSION_SECRET
+APP_SESSION_SECRET
+D1_ACCOUNT_ID
+D1_DATABASE_ID
+D1_API_TOKEN
+R2_ENDPOINT_URL
+R2_BUCKET_NAME
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_REGION
+```
+
+5. Rodar o primeiro deploy do Worker/Container
+6. Validar `healthz`, login, admin, D1 e R2
+7. Cortar o trafego do dominio para a Cloudflare e, apos estabilizacao, desligar o Render
+
+Consulte:
+
+- [docs/cloudflare-containers-migration.md](/D:/diegoluks/CONFERIR%20PONTO/docs/cloudflare-containers-migration.md)
 
 ### Hostinger + Cloudflare Tunnel
 
@@ -110,6 +162,10 @@ docker compose up -d --build
 O health check fica em:
 
 `/healthz`
+
+Observacao:
+
+- O Render agora deve ser tratado como legado/rollback ate a migracao completa para Cloudflare Containers.
 
 ## Fluxo antigo em linha de comando
 

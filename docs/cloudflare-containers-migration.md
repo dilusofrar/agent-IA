@@ -29,7 +29,8 @@ Sources:
 - `cloudflare/package.json`
 - `cloudflare/tsconfig.json`
 
-These files do not replace Render yet. They add the Cloudflare deployment path in parallel.
+These files now define the Cloudflare deployment path. Render should remain only as a
+temporary rollback target until the first production cutover is validated.
 
 ## How the new Worker works
 
@@ -63,6 +64,26 @@ wrangler secret put ADMIN_USERNAME
 wrangler secret put D1_API_BASE_URL
 ```
 
+For dashboard-based deployments, split configuration in two places:
+
+- Build-time variables
+  - `CLOUDFLARE_API_TOKEN`
+  - `CLOUDFLARE_ACCOUNT_ID`
+- Runtime variables and secrets for the Worker/container
+  - `ADMIN_USERNAME`
+  - `ADMIN_PASSWORD`
+  - `ADMIN_SESSION_SECRET`
+  - `APP_SESSION_SECRET`
+  - `D1_ACCOUNT_ID`
+  - `D1_DATABASE_ID`
+  - `D1_API_TOKEN`
+  - `D1_API_BASE_URL` (optional)
+  - `R2_ENDPOINT_URL`
+  - `R2_BUCKET_NAME`
+  - `R2_ACCESS_KEY_ID`
+  - `R2_SECRET_ACCESS_KEY`
+  - `R2_REGION`
+
 ## First deployment steps
 
 From `cloudflare/`:
@@ -82,11 +103,25 @@ Source:
 
 ## Important notes
 
-- This Worker currently proxies everything to the FastAPI app inside the container.
+- This Worker proxies everything to the FastAPI app inside the container.
 - D1 and R2 remain the system of record.
 - The app already supports D1 as the primary persistence path and R2 as storage.
-- After the billing issue is resolved, this path should let you cut over from Render without
-  redesigning the core Python logic first.
+- This path lets you cut over from Render without redesigning the core Python logic first.
+
+## Production cutover checklist
+
+1. Deploy the Worker and container successfully.
+2. Confirm all Worker runtime variables and secrets are present.
+3. Validate the default `workers.dev` hostname:
+   - `/healthz`
+   - app login
+   - admin login
+   - PDF processing
+   - D1-backed users and settings
+   - R2-backed report persistence and exports
+4. Point `ubuntucode.com` at the Cloudflare Worker route.
+5. Keep Render online briefly only for rollback.
+6. After stable validation, disable or delete the Render service.
 
 ## Next refactors after first successful Cloudflare deploy
 

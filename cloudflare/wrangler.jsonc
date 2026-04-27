@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "project1",
+  "name": "agent-ia-ponto",
   "main": "src/index.ts",
   "compatibility_date": "2026-04-25",
   "observability": {
