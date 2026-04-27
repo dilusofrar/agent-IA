@@ -20,7 +20,7 @@
   "d1_databases": [
     {
       "binding": "D1",
-      "database_name": "D1_project1",
+      "database_name": "agent-ia-ponto",
       "database_id": "738be066-2aed-4043-b050-52c3cd3e12b4"
     }
   ],
