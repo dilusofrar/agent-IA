@@ -7,11 +7,28 @@
     "enabled": true
   },
   "vars": {
+    "ADMIN_USERNAME": "diegoluks",
+    "D1_BINDING_NAME": "D1_project1",
+    "ENABLE_API_DOCS": "false",
     "PORT": "8000",
     "PYTHONPATH": "/app/src",
-    "ENABLE_API_DOCS": "false",
+    "R2_BINDING_NAME": "rendflare_project1",
+    "R2_BUCKET_NAME": "rendflare",
     "R2_REGION": "auto"
   },
+  "d1_databases": [
+    {
+      "binding": "D1_project1",
+      "database_name": "D1_project1",
+      "database_id": "738be066-2aed-4043-b050-52c3cd3e12b4"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "rendflare_project1",
+      "bucket_name": "rendflare"
+    }
+  ],
   "containers": [
     {
       "class_name": "AgentIaPontoContainer",
