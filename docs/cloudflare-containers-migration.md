@@ -21,6 +21,7 @@ Sources:
 - [Containers getting started](https://developers.cloudflare.com/containers/get-started/)
 - [Wrangler containers configuration](https://developers.cloudflare.com/workers/wrangler/configuration/)
 - [Container interface](https://developers.cloudflare.com/containers/container-class/)
+- [Connect to Workers and Bindings](https://developers.cloudflare.com/containers/platform-details/workers-connections/)
 
 ## Files added for the migration
 
@@ -31,6 +32,11 @@ Sources:
 
 These files now define the Cloudflare deployment path. Render should remain only as a
 temporary rollback target until the first production cutover is validated.
+
+Important:
+- native D1 and R2 access from inside the container uses outbound handlers, which require
+  `@cloudflare/containers` version `0.2.0` or later according to Cloudflare's March 26,
+  2026 Containers changelog.
 
 Important:
 - if the Cloudflare connected-build project was originally created with a different Worker
