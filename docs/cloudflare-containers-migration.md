@@ -55,21 +55,25 @@ Before deploying the Worker, add these secrets with Wrangler:
 wrangler secret put ADMIN_PASSWORD
 wrangler secret put ADMIN_SESSION_SECRET
 wrangler secret put APP_SESSION_SECRET
-wrangler secret put D1_ACCOUNT_ID
-wrangler secret put D1_DATABASE_ID
-wrangler secret put D1_API_TOKEN
-wrangler secret put R2_ENDPOINT_URL
-wrangler secret put R2_BUCKET_NAME
-wrangler secret put R2_ACCESS_KEY_ID
-wrangler secret put R2_SECRET_ACCESS_KEY
 ```
 
 Optional:
 
 ```bash
 wrangler secret put ADMIN_USERNAME
-wrangler secret put D1_API_BASE_URL
 ```
+
+When using first-class Cloudflare bindings from Containers, the Worker only needs two
+runtime variables to discover the existing bindings:
+
+```bash
+wrangler secret put D1_BINDING_NAME
+wrangler secret put R2_BINDING_NAME
+```
+
+Set them to the binding names already attached to the Worker in the Cloudflare dashboard.
+The Worker will expose those bindings to the Python container through outbound handlers,
+so the container no longer needs D1 API tokens or R2 S3-compatible credentials.
 
 For dashboard-based deployments, split configuration in two places:
 
@@ -81,15 +85,20 @@ For dashboard-based deployments, split configuration in two places:
   - `ADMIN_PASSWORD`
   - `ADMIN_SESSION_SECRET`
   - `APP_SESSION_SECRET`
-  - `D1_ACCOUNT_ID`
-  - `D1_DATABASE_ID`
-  - `D1_API_TOKEN`
-  - `D1_API_BASE_URL` (optional)
-  - `R2_ENDPOINT_URL`
-  - `R2_BUCKET_NAME`
-  - `R2_ACCESS_KEY_ID`
-  - `R2_SECRET_ACCESS_KEY`
+  - `D1_BINDING_NAME`
+  - `R2_BINDING_NAME`
+  - `R2_BUCKET_NAME` (optional, for diagnostics/location display)
   - `R2_REGION`
+
+Legacy compatibility mode is still supported if you need rollback without native bindings:
+
+- `D1_ACCOUNT_ID`
+- `D1_DATABASE_ID`
+- `D1_API_TOKEN`
+- `D1_API_BASE_URL` (optional)
+- `R2_ENDPOINT_URL`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
 
 ## First deployment steps
 
@@ -133,6 +142,6 @@ Source:
 ## Next refactors after first successful Cloudflare deploy
 
 1. Move `healthz` and lightweight diagnostics into the Worker layer too.
-2. Replace D1 REST credentials with first-class Worker bindings where it adds value.
+2. Remove legacy D1 and R2 credential variables after the native binding path is validated.
 3. Split static assets from the container if you want cheaper edge delivery.
 4. Add staging and production environments in `wrangler.jsonc`.

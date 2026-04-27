@@ -5,6 +5,9 @@ import os
 from pathlib import Path
 from time import time
 from typing import Protocol
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 
@@ -187,6 +190,100 @@ class R2ReportStorage:
         return "r2"
 
 
+class CloudflareBindingReportStorage:
+    def __init__(self, *, endpoint_url: str, bucket_name: str = "") -> None:
+        self.endpoint_url = endpoint_url.rstrip("/")
+        self.bucket_name = bucket_name
+
+    def write_bytes(self, key: str, content: bytes) -> StoredObject:
+        request = Request(
+            self._url_for(key),
+            data=content,
+            headers={"Content-Type": "application/octet-stream"},
+            method="PUT",
+        )
+        self._open(request).read()
+        return StoredObject(key=key, location=self._location_for(key))
+
+    def read_bytes(self, key: str) -> bytes | None:
+        request = Request(self._url_for(key), method="GET")
+        try:
+            return self._open(request).read()
+        except HTTPError as exc:
+            if exc.code == 404:
+                return None
+            raise RuntimeError(f"R2 binding HTTP error {exc.code}: {exc.reason}") from exc
+
+    def delete(self, key: str) -> None:
+        request = Request(self._url_for(key), method="DELETE")
+        self._open(request).read()
+
+    def exists(self, key: str) -> bool:
+        request = Request(self._url_for(key), method="HEAD")
+        try:
+            self._open(request).read()
+            return True
+        except HTTPError as exc:
+            if exc.code == 404:
+                return False
+            raise RuntimeError(f"R2 binding HTTP error {exc.code}: {exc.reason}") from exc
+
+    def probe(self) -> dict[str, object]:
+        probe_key = f"_storage_probe/{int(time())}-{uuid4().hex}.txt"
+        payload = f"r2-storage-probe:{probe_key}".encode("utf-8")
+        delete_ok = False
+        try:
+            stored = self.write_bytes(probe_key, payload)
+            read_back = self.read_bytes(probe_key)
+            try:
+                self.delete(probe_key)
+                delete_ok = not self.exists(probe_key)
+            finally:
+                if not delete_ok:
+                    try:
+                        self.delete(probe_key)
+                    except Exception:
+                        pass
+            return {
+                "backend": self.backend_name,
+                "ok": read_back == payload and delete_ok,
+                "bucket": self.bucket_name or None,
+                "key": probe_key,
+                "location": stored.location,
+                "writeOk": True,
+                "readOk": read_back == payload,
+                "deleteOk": delete_ok,
+            }
+        except Exception as exc:
+            return {
+                "backend": self.backend_name,
+                "ok": False,
+                "bucket": self.bucket_name or None,
+                "key": probe_key,
+                "writeOk": False,
+                "readOk": False,
+                "deleteOk": False,
+                "error": str(exc),
+            }
+
+    @property
+    def backend_name(self) -> str:
+        return "r2"
+
+    def _url_for(self, key: str) -> str:
+        return f"{self.endpoint_url}/{quote(key.lstrip('/'), safe='/-._~')}"
+
+    def _location_for(self, key: str) -> str:
+        bucket = self.bucket_name or "binding"
+        return f"r2://{bucket}/{key}"
+
+    def _open(self, request: Request):
+        try:
+            return urlopen(request, timeout=20)
+        except URLError as exc:
+            raise RuntimeError(f"R2 binding connection error: {exc.reason}") from exc
+
+
 def storage_from_env(root_dir: Path) -> ReportStorage:
     endpoint_url = os.getenv("R2_ENDPOINT_URL", "").strip()
     bucket_name = os.getenv("R2_BUCKET_NAME", "").strip()
@@ -201,6 +298,11 @@ def storage_from_env(root_dir: Path) -> ReportStorage:
             access_key_id=access_key_id,
             secret_access_key=secret_access_key,
             region_name=region_name,
+        )
+    if endpoint_url.startswith("http://r2.binding") or endpoint_url.startswith("https://r2.binding"):
+        return CloudflareBindingReportStorage(
+            endpoint_url=endpoint_url,
+            bucket_name=bucket_name,
         )
     return LocalReportStorage(root_dir)
 

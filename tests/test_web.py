@@ -16,8 +16,8 @@ if str(SRC_DIR) not in sys.path:
 
 from conferir_ponto.persistence import create_user, hydrate_local_cache_from_d1
 import conferir_ponto.persistence as persistence_module
-from conferir_ponto.d1_api import D1ApiClient
-from conferir_ponto.storage import LocalReportStorage, storage_from_env
+from conferir_ponto.d1_api import D1ApiClient, d1_from_env
+from conferir_ponto.storage import CloudflareBindingReportStorage, LocalReportStorage, storage_from_env
 from conferir_ponto.web import REPORTS, app, hash_password, sanitize_download_name
 import conferir_ponto.web as web_module
 
@@ -1369,6 +1369,39 @@ class WebHelpersTests(unittest.TestCase):
 
         mocked_storage.assert_called_once()
         self.assertEqual(storage.backend_name, "r2")
+
+    def test_storage_from_env_uses_cloudflare_binding_when_endpoint_targets_binding(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "R2_ENDPOINT_URL": "http://r2.binding",
+                "R2_BUCKET_NAME": "rendflare",
+            },
+            clear=False,
+        ):
+            storage = storage_from_env(Path("D:/tmp/reports"))
+
+        self.assertIsInstance(storage, CloudflareBindingReportStorage)
+        self.assertEqual(storage.backend_name, "r2")
+
+    def test_d1_from_env_uses_native_binding_url_without_cloudflare_api_credentials(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "D1_API_BASE_URL": "http://d1.binding",
+                "D1_ACCOUNT_ID": "",
+                "D1_DATABASE_ID": "",
+                "D1_API_TOKEN": "",
+                "CLOUDFLARE_ACCOUNT_ID": "",
+                "CLOUDFLARE_API_TOKEN": "",
+            },
+            clear=False,
+        ):
+            client = d1_from_env()
+
+        self.assertIsNotNone(client)
+        self.assertTrue(client.enabled)
+        self.assertEqual(client.base_url, "http://d1.binding")
 
     def test_update_user_uses_upsert_for_d1_mirror(self):
         class FakeD1Client:

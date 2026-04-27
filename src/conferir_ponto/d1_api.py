@@ -10,6 +10,7 @@ from urllib.request import Request, urlopen
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 D1_SCHEMA_PATH = BASE_DIR / "docs" / "d1-schema.sql"
+DEFAULT_D1_API_BASE_URL = "https://api.cloudflare.com/client/v4"
 D1_MIGRATIONS = (
     "ALTER TABLE reports ADD COLUMN owner_user_id TEXT",
     "ALTER TABLE reports ADD COLUMN owner_username TEXT",
@@ -59,7 +60,10 @@ class D1ApiClient:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.account_id and self.database_id and self.api_token)
+        return bool(
+            (self.account_id and self.database_id and self.api_token)
+            or self._uses_native_binding()
+        )
 
     def query(self, sql: str, params: list[Any] | tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
         payload: dict[str, Any] = {"sql": sql}
@@ -105,17 +109,21 @@ class D1ApiClient:
                     raise
 
     def _post(self, suffix: str, body: dict[str, Any]) -> dict[str, Any]:
-        url = (
-            f"{self.base_url}/accounts/{self.account_id}/d1/database/{self.database_id}"
-            f"{suffix}"
-        )
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if self._uses_native_binding():
+            url = f"{self.base_url}{suffix}"
+        else:
+            url = (
+                f"{self.base_url}/accounts/{self.account_id}/d1/database/{self.database_id}"
+                f"{suffix}"
+            )
+            headers["Authorization"] = f"Bearer {self.api_token}"
         request = Request(
             url,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_token}",
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
         try:
@@ -133,6 +141,13 @@ class D1ApiClient:
             ) or "D1 operation failed."
             raise RuntimeError(error_message)
         return payload
+
+    def _uses_native_binding(self) -> bool:
+        return bool(
+            self.base_url
+            and self.base_url != DEFAULT_D1_API_BASE_URL
+            and not (self.account_id and self.database_id and self.api_token)
+        )
 
     def _extract_results(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         result = payload.get("result")
@@ -159,12 +174,19 @@ def d1_from_env() -> D1ApiClient | None:
         os.getenv("D1_API_TOKEN", "").strip()
         or os.getenv("CLOUDFLARE_API_TOKEN", "").strip()
     )
-    base_url = os.getenv("D1_API_BASE_URL", "https://api.cloudflare.com/client/v4").strip()
+    base_url = os.getenv("D1_API_BASE_URL", DEFAULT_D1_API_BASE_URL).strip()
     if not account_id or not database_id or not api_token:
-        return None
+        if not base_url or base_url == DEFAULT_D1_API_BASE_URL:
+            return None
+        return D1ApiClient(
+            account_id="",
+            database_id="",
+            api_token="",
+            base_url=base_url,
+        )
     return D1ApiClient(
         account_id=account_id,
         database_id=database_id,
         api_token=api_token,
-        base_url=base_url or "https://api.cloudflare.com/client/v4",
+        base_url=base_url or DEFAULT_D1_API_BASE_URL,
     )
