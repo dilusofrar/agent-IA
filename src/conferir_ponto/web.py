@@ -23,13 +23,11 @@ from conferir_ponto.persistence import (
     create_user,
     delete_report_record,
     d1_status,
-    hydrate_local_cache_from_d1,
     list_user_audit_entries,
     list_users,
     list_recent_report_records,
     load_report_record,
     load_user_by_username,
-    persistence_drift_summary,
     persistence_record_counts,
     persistence_backend_name,
     stale_report_ids,
@@ -97,12 +95,7 @@ _REPORT_STORAGE: ReportStorage | None = None
 
 @app.on_event("startup")
 async def hydrate_persistence_cache() -> None:
-    try:
-        summary = hydrate_local_cache_from_d1()
-        if any(summary.values()):
-            LOGGER.info("d1_local_cache_hydrated", extra=summary)
-    except Exception as exc:
-        LOGGER.warning("d1_local_cache_hydration_failed", extra={"error": str(exc)})
+    return None
 
 
 @app.exception_handler(Exception)
@@ -304,8 +297,8 @@ async def admin_persistence_status(request: Request) -> JSONResponse:
         {
             **d1_status(),
             "recordCounts": persistence_record_counts(),
-            "drift": persistence_drift_summary(),
             "storageBackend": report_storage().backend_name,
+            "runtimeMode": "d1-only" if d1_status().get("enabled") else "sqlite",
         }
     )
 
@@ -321,9 +314,9 @@ async def admin_storage_diagnostics(request: Request) -> JSONResponse:
             "status": {
                 **d1_status(),
                 "recordCounts": persistence_record_counts(),
-                "drift": persistence_drift_summary(),
                 "storageBackend": report_storage().backend_name,
                 "storageProbe": diagnostics,
+                "runtimeMode": "d1-only" if d1_status().get("enabled") else "sqlite",
             },
         },
         status_code=status_code,
@@ -335,18 +328,16 @@ async def admin_sync_d1(request: Request) -> JSONResponse:
     ensure_admin(request)
     if not d1_status().get("enabled"):
         raise HTTPException(status_code=400, detail="D1 não configurado.")
-    try:
-        summary = hydrate_local_cache_from_d1()
-    except RuntimeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(
         {
-            "synced": True,
-            "summary": summary,
+            "synced": False,
+            "deprecated": True,
+            "summary": {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0, "userAudit": 0},
+            "detail": "SQLite cache desativado em modo Cloudflare nativo.",
             "status": {
                 **d1_status(),
                 "recordCounts": persistence_record_counts(),
-                "drift": persistence_drift_summary(),
+                "runtimeMode": "d1-only",
             },
         }
     )

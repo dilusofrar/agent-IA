@@ -137,7 +137,7 @@ def d1_client() -> D1ApiClient | None:
 
 
 def persistence_backend_name() -> str:
-    return "sqlite+d1" if d1_client() is not None else "sqlite"
+    return "d1" if d1_client() is not None else "sqlite"
 
 
 def prefer_d1_reads() -> bool:
@@ -416,142 +416,9 @@ def _local_replace_user_audit(rows: list[dict[str, Any]]) -> None:
 
 
 def hydrate_local_cache_from_d1() -> dict[str, int]:
-    client = d1_client()
-    if client is None:
-        return {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0, "userAudit": 0}
-    ensure_app_db()
-    settings_rows = mirror_fetch_all(
-        "SELECT scope, payload_json, updated_at FROM settings_current"
-    )
-    settings_audit_rows = mirror_fetch_all(
-        """
-        SELECT changed_at, actor, changes_json, settings_json
-        FROM settings_audit
-        ORDER BY changed_at ASC
-        """
-    )
-    report_rows = mirror_fetch_all(
-        """
-        SELECT report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
-               processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
-               export_pdf_key, source_pdf_path, export_pdf_path
-        FROM reports
-        ORDER BY created_at ASC
-        """
-    )
-    user_rows = mirror_fetch_all(
-        """
-        SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-        FROM users
-        ORDER BY created_at ASC
-        """
-    )
-    user_audit_rows = mirror_fetch_all(
-        """
-        SELECT changed_at, actor, target_username, action, changes_json
-        FROM user_audit
-        ORDER BY changed_at ASC
-        """
-    )
-    with open_db() as connection:
-        connection.execute("DELETE FROM settings_current")
-        connection.execute("DELETE FROM settings_audit")
-        connection.execute("DELETE FROM reports")
-        connection.execute("DELETE FROM users")
-        connection.execute("DELETE FROM user_audit")
-        connection.executemany(
-            """
-            INSERT INTO settings_current (scope, payload_json, updated_at)
-            VALUES (?, ?, ?)
-            """,
-            [(row["scope"], row["payload_json"], row["updated_at"]) for row in settings_rows],
-        )
-        connection.executemany(
-            """
-            INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
-            VALUES (?, ?, ?, ?)
-            """,
-            [
-                (row["changed_at"], row["actor"], row["changes_json"], row["settings_json"])
-                for row in settings_audit_rows
-            ],
-        )
-        connection.executemany(
-            """
-            INSERT INTO reports (
-                report_id, filename, employee_name, owner_user_id, owner_username, period_start, period_end,
-                processed_at, created_at, processing_duration_ms, recent_json, payload_json, source_pdf_key,
-                export_pdf_key, source_pdf_path, export_pdf_path
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    row["report_id"],
-                    row["filename"],
-                    row["employee_name"],
-                    row["owner_user_id"],
-                    row["owner_username"],
-                    row["period_start"],
-                    row["period_end"],
-                    row["processed_at"],
-                    row["created_at"],
-                    row["processing_duration_ms"],
-                    row["recent_json"],
-                    row["payload_json"],
-                    row["source_pdf_key"],
-                    row["export_pdf_key"],
-                    row["source_pdf_path"],
-                    row["export_pdf_path"],
-                )
-                for row in report_rows
-            ],
-        )
-        connection.executemany(
-            """
-            INSERT INTO users (
-                id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    row["id"],
-                    row["username"],
-                    row["email"],
-                    row["display_name"],
-                    row["password_hash"],
-                    row["role"],
-                    row["is_active"],
-                    row["created_at"],
-                    row["updated_at"],
-                )
-                for row in user_rows
-            ],
-        )
-        connection.executemany(
-            """
-            INSERT INTO user_audit (changed_at, actor, target_username, action, changes_json)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    row["changed_at"],
-                    row["actor"],
-                    row["target_username"],
-                    row["action"],
-                    row["changes_json"],
-                )
-                for row in user_audit_rows
-            ],
-        )
-    return {
-        "settingsCurrent": len(settings_rows),
-        "settingsAudit": len(settings_audit_rows),
-        "reports": len(report_rows),
-        "users": len(user_rows),
-        "userAudit": len(user_audit_rows),
-    }
+    # In Cloudflare-native mode D1 is the only persistence source, so there is
+    # no longer a local SQLite cache to hydrate.
+    return {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0, "userAudit": 0}
 
 
 def _is_missing_d1_schema_error(exc: Exception) -> bool:
@@ -732,6 +599,10 @@ def persistence_record_counts() -> dict[str, Any]:
     if d1_client() is not None:
         for key, sql in table_queries.items():
             d1_counts[key] = _extract_count_value(mirror_fetch_one(sql))
+        return {
+            "backend": "d1",
+            "d1": d1_counts,
+        }
 
     if APP_DB_PATH.exists():
         with open_db() as connection:
@@ -739,12 +610,20 @@ def persistence_record_counts() -> dict[str, Any]:
                 local_counts[key] = _extract_count_value(connection.execute(sql).fetchone())
 
     return {
+        "backend": "sqlite",
         "d1": d1_counts,
         "sqlite": local_counts,
     }
 
 
 def persistence_drift_summary() -> dict[str, Any]:
+    if d1_client() is not None:
+        return {
+            "mode": "d1-only",
+            "inSync": True,
+            "mismatchCount": 0,
+            "mismatches": [],
+        }
     counts = persistence_record_counts()
     d1_counts = counts["d1"]
     sqlite_counts = counts["sqlite"]
@@ -916,7 +795,8 @@ def save_current_settings_payload(payload: dict[str, Any]) -> None:
         """,
         ["global", payload_json, updated_at],
     )
-    _local_upsert_settings_current("global", payload_json, updated_at)
+    if d1_client() is None:
+        _local_upsert_settings_current("global", payload_json, updated_at)
 
 
 def load_current_settings_payload() -> dict[str, Any] | None:
@@ -932,12 +812,8 @@ def load_current_settings_payload() -> dict[str, Any] | None:
                 context="d1.settings_current.global",
             )
             if isinstance(decoded_payload, dict):
-                _local_upsert_settings_current(
-                    "global",
-                    d1_row["payload_json"],
-                    d1_row.get("updated_at") or datetime.now().isoformat(timespec="seconds"),
-                )
                 return decoded_payload
+        return None
     if not APP_DB_PATH.exists():
         return None
     with open_db() as connection:
@@ -965,14 +841,15 @@ def append_settings_audit_entry(entry: dict[str, Any]) -> None:
         """,
         [entry["changedAt"], entry["actor"], changes_json, settings_json],
     )
-    with open_db() as connection:
-        connection.execute(
-            """
-            INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
-            VALUES (?, ?, ?, ?)
-            """,
-            (entry["changedAt"], entry["actor"], changes_json, settings_json),
-        )
+    if d1_client() is None:
+        with open_db() as connection:
+            connection.execute(
+                """
+                INSERT INTO settings_audit (changed_at, actor, changes_json, settings_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (entry["changedAt"], entry["actor"], changes_json, settings_json),
+            )
 
 
 def _normalize_settings_audit_rows(rows: list[Any], *, context: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -1026,8 +903,8 @@ def load_settings_audit_entries(limit: int = 12) -> list[dict[str, Any]]:
                 context="d1.settings_audit",
             )
             if normalized_items:
-                _local_replace_settings_audit(list(reversed(valid_rows)))
                 return normalized_items
+        return []
     if not APP_DB_PATH.exists():
         return []
     with open_db() as connection:
@@ -1126,24 +1003,25 @@ def upsert_report_record(
             export_pdf_path,
         ],
     )
-    _local_upsert_report_row(
-        report_id=report_id,
-        filename=filename,
-        employee_name=payload.get("employeeName"),
-        owner_user_id=owner_user_id,
-        owner_username=owner_username,
-        period_start=payload.get("periodStart"),
-        period_end=payload.get("periodEnd"),
-        processed_at=payload.get("processedAt"),
-        created_at=created_at,
-        processing_duration_ms=payload.get("meta", {}).get("processingDurationMs"),
-        recent_json=recent_json,
-        payload_json=payload_json,
-        source_pdf_key=source_pdf_key,
-        export_pdf_key=export_pdf_key,
-        source_pdf_path=source_pdf_path,
-        export_pdf_path=export_pdf_path,
-    )
+    if d1_client() is None:
+        _local_upsert_report_row(
+            report_id=report_id,
+            filename=filename,
+            employee_name=payload.get("employeeName"),
+            owner_user_id=owner_user_id,
+            owner_username=owner_username,
+            period_start=payload.get("periodStart"),
+            period_end=payload.get("periodEnd"),
+            processed_at=payload.get("processedAt"),
+            created_at=created_at,
+            processing_duration_ms=payload.get("meta", {}).get("processingDurationMs"),
+            recent_json=recent_json,
+            payload_json=payload_json,
+            source_pdf_key=source_pdf_key,
+            export_pdf_key=export_pdf_key,
+            source_pdf_path=source_pdf_path,
+            export_pdf_path=export_pdf_path,
+        )
 
 
 def load_report_record(report_id: str) -> dict[str, Any] | None:
@@ -1159,24 +1037,6 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
             (report_id,),
         )
         if selected_row is not None:
-            _local_upsert_report_row(
-                report_id=report_id,
-                filename=selected_row["filename"],
-                employee_name=json.loads(selected_row["payload_json"]).get("employeeName"),
-                owner_user_id=selected_row["owner_user_id"],
-                owner_username=selected_row["owner_username"],
-                period_start=selected_row["period_start"],
-                period_end=selected_row["period_end"],
-                processed_at=selected_row["processed_at"],
-                created_at=selected_row["created_at"],
-                processing_duration_ms=selected_row["processing_duration_ms"],
-                recent_json=selected_row["recent_json"],
-                payload_json=selected_row["payload_json"],
-                source_pdf_key=selected_row["source_pdf_key"],
-                export_pdf_key=selected_row["export_pdf_key"],
-                source_pdf_path=selected_row["source_pdf_path"],
-                export_pdf_path=selected_row["export_pdf_path"],
-            )
             return {
                 "reportId": report_id,
                 "filename": selected_row["filename"],
@@ -1189,6 +1049,7 @@ def load_report_record(report_id: str) -> dict[str, Any] | None:
                 "sourcePdfPath": selected_row["source_pdf_path"],
                 "exportPdfPath": selected_row["export_pdf_path"],
             }
+        return None
     if not APP_DB_PATH.exists():
         return None
     with open_db() as connection:
@@ -1231,26 +1092,8 @@ def list_recent_report_records(limit: int) -> list[dict[str, Any]]:
             (max(0, int(limit)),),
         )
         if d1_rows:
-            for row in d1_rows:
-                _local_upsert_report_row(
-                    report_id=row["report_id"],
-                    filename=row["filename"],
-                    employee_name=row["employee_name"],
-                    owner_user_id=row["owner_user_id"],
-                    owner_username=row["owner_username"],
-                    period_start=row["period_start"],
-                    period_end=row["period_end"],
-                    processed_at=row["processed_at"],
-                    created_at=row["created_at"],
-                    processing_duration_ms=row["processing_duration_ms"],
-                    recent_json=row["recent_json"],
-                    payload_json=row["payload_json"],
-                    source_pdf_key=row["source_pdf_key"],
-                    export_pdf_key=row["export_pdf_key"],
-                    source_pdf_path=row["source_pdf_path"],
-                    export_pdf_path=row["export_pdf_path"],
-                )
             return [json.loads(row["recent_json"]) for row in d1_rows]
+        return []
     if not APP_DB_PATH.exists():
         return []
     with open_db() as connection:
@@ -1313,17 +1156,18 @@ def update_user(
             now,
         ],
     )
-    _local_upsert_user_row(
-        user_id=existing.get("id"),
-        username=normalized_username,
-        email=effective_email,
-        display_name=effective_display_name,
-        password_hash=effective_password_hash,
-        role=effective_role,
-        is_active=effective_is_active,
-        created_at=existing.get("createdAt"),
-        updated_at=now,
-    )
+    if d1_client() is None:
+        _local_upsert_user_row(
+            user_id=existing.get("id"),
+            username=normalized_username,
+            email=effective_email,
+            display_name=effective_display_name,
+            password_hash=effective_password_hash,
+            role=effective_role,
+            is_active=effective_is_active,
+            created_at=existing.get("createdAt"),
+            updated_at=now,
+        )
     return load_user_by_username(normalized_username) or {}
 
 
@@ -1341,6 +1185,7 @@ def stale_report_ids(max_records: int) -> list[str]:
         )
         if rows:
             return [row["report_id"] for row in rows]
+        return []
     if not APP_DB_PATH.exists():
         return []
     with open_db() as connection:
@@ -1358,7 +1203,7 @@ def stale_report_ids(max_records: int) -> list[str]:
 
 def delete_report_record(report_id: str) -> None:
     best_effort_d1_write("DELETE FROM reports WHERE report_id = ?", [report_id])
-    if APP_DB_PATH.exists():
+    if d1_client() is None and APP_DB_PATH.exists():
         with open_db() as connection:
             connection.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
 
@@ -1366,6 +1211,21 @@ def delete_report_record(report_id: str) -> None:
 def load_user_by_username(username: str) -> dict[str, Any] | None:
     normalized_username = str(username or "").strip()
     if not normalized_username:
+        return None
+    client = d1_client()
+    if client is not None:
+        selected_row = mirror_fetch_one(
+            """
+            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
+            FROM users
+            WHERE username = ?
+            """,
+            (normalized_username,),
+        )
+        if selected_row is not None:
+            return _row_to_user(selected_row)
+        return None
+    if not APP_DB_PATH.exists():
         return None
     local_user: dict[str, Any] | None = None
     if APP_DB_PATH.exists():
@@ -1380,34 +1240,6 @@ def load_user_by_username(username: str) -> dict[str, Any] | None:
             ).fetchone()
         if row is not None:
             local_user = _row_to_user(row)
-    client = d1_client()
-    if client is not None:
-        selected_row = mirror_fetch_one(
-            """
-            SELECT id, username, email, display_name, password_hash, role, is_active, created_at, updated_at
-            FROM users
-            WHERE username = ?
-            """,
-            (normalized_username,),
-        )
-        if selected_row is not None:
-            d1_user = _row_to_user(selected_row)
-            primary_user, fallback_user = _prefer_newer_user_record(d1_user, local_user)
-            merged_user = _merge_user_records(primary_user, fallback_user) or d1_user
-            _local_upsert_user_row(
-                user_id=merged_user["id"],
-                username=merged_user["username"],
-                email=merged_user["email"],
-                display_name=merged_user["displayName"],
-                password_hash=merged_user["passwordHash"],
-                role=merged_user["role"],
-                is_active=bool(merged_user["isActive"]),
-                created_at=merged_user["createdAt"],
-                updated_at=merged_user["updatedAt"],
-            )
-            return merged_user
-    if not APP_DB_PATH.exists():
-        return None
     return local_user
 
 
@@ -1435,9 +1267,7 @@ def list_users(limit: int = 100) -> list[dict[str, Any]]:
     if client is not None:
         d1_rows = mirror_fetch_all(query, (effective_limit,))
         d1_users = [normalize_row(row) for row in d1_rows]
-        if d1_rows:
-            _local_replace_users(d1_rows)
-            return d1_users
+        return d1_users
     if not APP_DB_PATH.exists():
         return []
 
@@ -1464,7 +1294,8 @@ def append_user_audit_entry(
         """,
         [changed_at, actor, target_username, action, changes_json],
     )
-    _local_append_user_audit(changed_at, actor, target_username, action, changes_json)
+    if d1_client() is None:
+        _local_append_user_audit(changed_at, actor, target_username, action, changes_json)
 
 
 def list_user_audit_entries(limit: int = 20) -> list[dict[str, Any]]:
@@ -1491,9 +1322,7 @@ def list_user_audit_entries(limit: int = 20) -> list[dict[str, Any]]:
             """,
             (max(1, int(limit)),),
         )
-        if selected_rows:
-            _local_replace_user_audit(list(reversed(selected_rows)))
-            return normalize(selected_rows)
+        return normalize(selected_rows)
     if not APP_DB_PATH.exists():
         return []
     with open_db() as connection:
@@ -1545,17 +1374,18 @@ def create_user(
             now,
         ],
     )
-    _local_upsert_user_row(
-        user_id=user_id,
-        username=normalized_username,
-        email=email,
-        display_name=display_name,
-        password_hash=password_hash,
-        role=role,
-        is_active=is_active,
-        created_at=now,
-        updated_at=now,
-    )
+    if d1_client() is None:
+        _local_upsert_user_row(
+            user_id=user_id,
+            username=normalized_username,
+            email=email,
+            display_name=display_name,
+            password_hash=password_hash,
+            role=role,
+            is_active=is_active,
+            created_at=now,
+            updated_at=now,
+        )
     return load_user_by_username(normalized_username) or {}
 
 
@@ -1602,15 +1432,16 @@ def upsert_user(
             now,
         ],
     )
-    _local_upsert_user_row(
-        user_id=user_id,
-        username=normalized_username,
-        email=email,
-        display_name=display_name,
-        password_hash=password_hash,
-        role=role,
-        is_active=is_active,
-        created_at=created_at,
-        updated_at=now,
-    )
+    if d1_client() is None:
+        _local_upsert_user_row(
+            user_id=user_id,
+            username=normalized_username,
+            email=email,
+            display_name=display_name,
+            password_hash=password_hash,
+            role=role,
+            is_active=is_active,
+            created_at=created_at,
+            updated_at=now,
+        )
     return load_user_by_username(normalized_username) or {}
