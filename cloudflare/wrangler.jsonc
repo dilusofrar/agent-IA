@@ -8,18 +8,19 @@
   },
   "vars": {
     "ADMIN_USERNAME": "diegoluks",
-    "D1_BINDING_NAME": "D1_project1",
+    "D1_BINDING_NAME": "D1",
     "ENABLE_API_DOCS": "false",
     "PORT": "8000",
     "PYTHONPATH": "/app/src",
-    "R2_BINDING_NAME": "rendflare_project1",
     "R2_BUCKET_NAME": "rendflare",
-    "R2_REGION": "auto"
+    "R2_REGION": "auto",
+    "R2_ENDPOINT": "https://6984ceb902d1604548a6b113c6f8e780.r2.cloudflarestorage.com",
+    "R2_BINDING_NAME": "R2"
   },
   "d1_databases": [
     {
-      "binding": "D1_project1",
-      "database_name": "agent-ia-ponto",
+      "binding": "D1",
+      "database_name": "D1_project1",
       "database_id": "738be066-2aed-4043-b050-52c3cd3e12b4"
     }
   ],
