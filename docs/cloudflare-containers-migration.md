@@ -32,6 +32,13 @@ Sources:
 These files now define the Cloudflare deployment path. Render should remain only as a
 temporary rollback target until the first production cutover is validated.
 
+Important:
+- if the Cloudflare connected-build project was originally created with a different Worker
+  name (for example `project1`), keep `wrangler.jsonc` aligned to that connected-build
+  name until the first container application is fully created.
+- after the first successful rollout, rename/recreate the Cloudflare project in a controlled
+  step if you want the public Worker name to match `agent-ia-ponto`.
+
 ## How the new Worker works
 
 - A single Durable Object-backed container instance is named `primary`.
