@@ -14,7 +14,7 @@
     "PYTHONPATH": "/app/src",
     "R2_BUCKET_NAME": "rendflare",
     "R2_REGION": "auto",
-    "R2_ENDPOINT": "https://6984ceb902d1604548a6b113c6f8e780.r2.cloudflarestorage.com",
+    "R2_ENDPOINT_URL": "https://6984ceb902d1604548a6b113c6f8e780.r2.cloudflarestorage.com",
     "R2_BINDING_NAME": "R2"
   },
   "d1_databases": [
