@@ -93,6 +93,16 @@ LOGGER = logging.getLogger("conferir_ponto.web")
 _REPORT_STORAGE: ReportStorage | None = None
 
 
+def render_static_page(page_name: str) -> HTMLResponse:
+    html = (STATIC_DIR / page_name).read_text(encoding="utf-8")
+    versioned_html = html.replace("/static/", f"/static/?v={APP_VERSION}")
+    versioned_html = versioned_html.replace("/static/?v=" + APP_VERSION + "styles.css", f"/static/styles.css?v={APP_VERSION}")
+    versioned_html = versioned_html.replace("/static/?v=" + APP_VERSION + "app.js", f"/static/app.js?v={APP_VERSION}")
+    versioned_html = versioned_html.replace("/static/?v=" + APP_VERSION + "login.js", f"/static/login.js?v={APP_VERSION}")
+    versioned_html = versioned_html.replace("/static/?v=" + APP_VERSION + "admin.js", f"/static/admin.js?v={APP_VERSION}")
+    return HTMLResponse(versioned_html)
+
+
 @app.on_event("startup")
 async def hydrate_persistence_cache() -> None:
     return None
@@ -125,28 +135,28 @@ async def apply_security_headers(request: Request, call_next) -> Response:
 async def index(request: Request) -> Response:
     if not is_app_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"))
+    return render_static_page("index.html")
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> Response:
     if is_app_authenticated(request):
         return RedirectResponse(url="/", status_code=303)
-    return HTMLResponse((STATIC_DIR / "login.html").read_text(encoding="utf-8"))
+    return render_static_page("login.html")
 
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request) -> Response:
     if not is_admin_authenticated(request):
         return RedirectResponse(url="/admin/login", status_code=303)
-    return HTMLResponse((STATIC_DIR / "admin.html").read_text(encoding="utf-8"))
+    return render_static_page("admin.html")
 
 
 @app.get("/admin/login", response_class=HTMLResponse)
 async def admin_login_page(request: Request) -> Response:
     if is_admin_authenticated(request):
         return RedirectResponse(url="/admin", status_code=303)
-    return HTMLResponse((STATIC_DIR / "admin-login.html").read_text(encoding="utf-8"))
+    return render_static_page("admin-login.html")
 
 
 @app.get("/healthz")
