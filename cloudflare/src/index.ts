@@ -41,17 +41,59 @@ function compactEnv(values: Record<string, string | undefined>): Record<string, 
   );
 }
 
+function isD1DatabaseBinding(value: unknown): value is D1Database {
+  return Boolean(value && typeof value === "object" && "prepare" in value);
+}
+
+function isR2BucketBinding(value: unknown): value is R2Bucket {
+  return Boolean(value && typeof value === "object" && "get" in value && "put" in value);
+}
+
+function discoverBindingName(
+  env: Env,
+  configuredName: string | undefined,
+  predicate: (value: unknown) => boolean,
+  label: string
+): string | undefined {
+  if (configuredName) {
+    return configuredName;
+  }
+  const matches = Object.entries(env)
+    .filter(([, value]) => predicate(value))
+    .map(([name]) => name)
+    .sort();
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `${label} binding name is ambiguous. Configure it explicitly. Candidates: ${matches.join(", ")}`
+    );
+  }
+  return undefined;
+}
+
+function getD1BindingName(env: Env): string | undefined {
+  return discoverBindingName(env, env.D1_BINDING_NAME, isD1DatabaseBinding, "D1");
+}
+
+function getR2BindingName(env: Env): string | undefined {
+  return discoverBindingName(env, env.R2_BINDING_NAME, isR2BucketBinding, "R2");
+}
+
 function getNativeD1BaseUrl(env: Env): string | undefined {
-  return env.D1_BINDING_NAME ? `http://${D1_OUTBOUND_HOST}` : env.D1_API_BASE_URL;
+  return getD1BindingName(env) ? `http://${D1_OUTBOUND_HOST}` : env.D1_API_BASE_URL;
 }
 
 function getNativeR2EndpointUrl(env: Env): string | undefined {
-  return env.R2_BINDING_NAME ? `http://${R2_OUTBOUND_HOST}` : env.R2_ENDPOINT_URL;
+  return getR2BindingName(env) ? `http://${R2_OUTBOUND_HOST}` : env.R2_ENDPOINT_URL;
 }
 
 function buildContainerEnv(env: Env): Record<string, string> {
-  const useNativeD1Binding = Boolean(env.D1_BINDING_NAME);
-  const useNativeR2Binding = Boolean(env.R2_BINDING_NAME);
+  const d1BindingName = getD1BindingName(env);
+  const r2BindingName = getR2BindingName(env);
+  const useNativeD1Binding = Boolean(d1BindingName);
+  const useNativeR2Binding = Boolean(r2BindingName);
   return compactEnv({
     PORT: env.PORT ?? DEFAULT_CONTAINER_PORT,
     PYTHONPATH: env.PYTHONPATH ?? "/app/src",
@@ -60,10 +102,12 @@ function buildContainerEnv(env: Env): Record<string, string> {
     ADMIN_PASSWORD: env.ADMIN_PASSWORD,
     ADMIN_SESSION_SECRET: env.ADMIN_SESSION_SECRET,
     APP_SESSION_SECRET: env.APP_SESSION_SECRET,
+    D1_BINDING_NAME: d1BindingName,
     D1_ACCOUNT_ID: useNativeD1Binding ? undefined : env.D1_ACCOUNT_ID,
     D1_DATABASE_ID: useNativeD1Binding ? undefined : env.D1_DATABASE_ID,
     D1_API_TOKEN: useNativeD1Binding ? undefined : env.D1_API_TOKEN,
     D1_API_BASE_URL: getNativeD1BaseUrl(env),
+    R2_BINDING_NAME: r2BindingName,
     R2_ENDPOINT_URL: getNativeR2EndpointUrl(env),
     R2_BUCKET_NAME: env.R2_BUCKET_NAME,
     R2_ACCESS_KEY_ID: useNativeR2Binding ? undefined : env.R2_ACCESS_KEY_ID,
@@ -73,27 +117,27 @@ function buildContainerEnv(env: Env): Record<string, string> {
 }
 
 function getD1Binding(env: Env) {
-  const bindingName = env.D1_BINDING_NAME;
+  const bindingName = getD1BindingName(env);
   if (!bindingName) {
-    throw new Error("D1_BINDING_NAME is not configured.");
+    throw new Error("D1 binding is unavailable.");
   }
   const binding = env[bindingName];
-  if (!binding || typeof binding !== "object" || !("prepare" in binding)) {
+  if (!isD1DatabaseBinding(binding)) {
     throw new Error(`D1 binding "${bindingName}" is unavailable.`);
   }
-  return binding as D1Database;
+  return binding;
 }
 
 function getR2Binding(env: Env) {
-  const bindingName = env.R2_BINDING_NAME;
+  const bindingName = getR2BindingName(env);
   if (!bindingName) {
-    throw new Error("R2_BINDING_NAME is not configured.");
+    throw new Error("R2 binding is unavailable.");
   }
   const binding = env[bindingName];
-  if (!binding || typeof binding !== "object" || !("get" in binding) || !("put" in binding)) {
+  if (!isR2BucketBinding(binding)) {
     throw new Error(`R2 binding "${bindingName}" is unavailable.`);
   }
-  return binding as R2Bucket;
+  return binding;
 }
 
 function isD1ReadQuery(sql: string): boolean {
