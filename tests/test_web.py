@@ -750,7 +750,7 @@ class WebAppTests(unittest.TestCase):
         response = client.get("/healthz")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["version"], "1.16.8")
+        self.assertEqual(response.json()["version"], "1.16.9")
         self.assertEqual(response.json()["storageBackend"], "local")
         self.assertEqual(response.json()["persistenceBackend"], "memory")
         self.assertEqual(response.headers["x-frame-options"], "DENY")

@@ -56,7 +56,7 @@ REPORTS_DIR = BASE_DIR / "data" / "reports"
 MAX_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024
 MAX_STORED_REPORTS = 32
 RECENT_REPORTS_LIMIT = 6
-APP_VERSION = "1.16.8"
+APP_VERSION = "1.16.9"
 ADMIN_SESSION_COOKIE = "agent_admin_session"
 APP_SESSION_COOKIE = "agent_app_session"
 ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -100,7 +100,10 @@ def render_static_page(page_name: str) -> HTMLResponse:
     versioned_html = versioned_html.replace("/static/?v=" + APP_VERSION + "app.js", f"/static/app.js?v={APP_VERSION}")
     versioned_html = versioned_html.replace("/static/?v=" + APP_VERSION + "login.js", f"/static/login.js?v={APP_VERSION}")
     versioned_html = versioned_html.replace("/static/?v=" + APP_VERSION + "admin.js", f"/static/admin.js?v={APP_VERSION}")
-    return HTMLResponse(versioned_html)
+    response = HTMLResponse(versioned_html)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @app.on_event("startup")
