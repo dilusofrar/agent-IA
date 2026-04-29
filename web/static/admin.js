@@ -466,13 +466,17 @@
     const storageProbe = status.storageProbe || null;
     const recordCounts = status.recordCounts || {};
     const d1Counts = recordCounts.d1 || {};
+    const d1BindingName = status.d1BindingName || "—";
+    const r2BindingName = status.r2BindingName || "—";
+    const r2BucketName = status.r2BucketName || "—";
     const cards = [
       summaryCard("Backend atual", status.backend || "memory", "Estado visto pelo healthcheck do app."),
       summaryCard("Storage ativo", status.storageBackend || "local", "Backend atual dos arquivos de relatório."),
       summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando o binding nativo do D1 está configurado no Worker."),
       summaryCard("Modo de execução", status.runtimeMode || "memory", "Fluxo atual de persistência da aplicação."),
-      summaryCard("Database ID", status.databaseId || "—", "Identificador do banco D1 vinculado."),
-      summaryCard("Account ID", status.accountId || "—", "Conta Cloudflare usada para a API do D1."),
+      summaryCard("Binding D1", d1BindingName, "Nome do binding D1 conectado ao Worker."),
+      summaryCard("Binding R2", r2BindingName, "Nome do binding R2 conectado ao Worker."),
+      summaryCard("Bucket R2", r2BucketName, "Bucket principal usado para PDFs e exportações."),
       summaryCard("Usuários no D1", String(d1Counts.users || 0), "Contas persistidas remotamente."),
       summaryCard("Relatórios no D1", String(d1Counts.reports || 0), "Apurações armazenadas no banco principal."),
       summaryCard("Regras atuais no D1", String(d1Counts.settingsCurrent || 0), "Escopos persistidos em settings_current."),

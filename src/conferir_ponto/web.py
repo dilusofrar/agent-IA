@@ -306,6 +306,7 @@ async def admin_persistence_status(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             **d1_status(),
+            **cloudflare_runtime_bindings_status(),
             "recordCounts": persistence_record_counts(),
             "storageBackend": report_storage().backend_name,
             "runtimeMode": "d1-only" if d1_status().get("enabled") else "memory",
@@ -323,6 +324,7 @@ async def admin_storage_diagnostics(request: Request) -> JSONResponse:
             "storage": diagnostics,
             "status": {
                 **d1_status(),
+                **cloudflare_runtime_bindings_status(),
                 "recordCounts": persistence_record_counts(),
                 "storageBackend": report_storage().backend_name,
                 "storageProbe": diagnostics,
@@ -923,6 +925,15 @@ def report_storage() -> ReportStorage:
     if _REPORT_STORAGE is None:
         _REPORT_STORAGE = storage_from_env(ensure_reports_dir())
     return _REPORT_STORAGE
+
+
+def cloudflare_runtime_bindings_status() -> dict[str, Any]:
+    return {
+        "d1BindingName": os.getenv("D1_BINDING_NAME", "").strip() or None,
+        "r2BindingName": os.getenv("R2_BINDING_NAME", "").strip() or None,
+        "r2BucketName": os.getenv("R2_BUCKET_NAME", "").strip() or None,
+        "r2Region": os.getenv("R2_REGION", "").strip() or None,
+    }
 
 
 def metadata_object_key(report_id: str) -> str:
