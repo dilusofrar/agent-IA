@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from conferir_ponto.persistence import (
     append_user_audit_entry,
     create_user,
+    d1_client,
     delete_report_record,
     d1_status,
     list_user_audit_entries,
@@ -35,6 +36,7 @@ from conferir_ponto.persistence import (
     upsert_user,
     upsert_report_record,
 )
+from conferir_ponto.d1_api import DEFAULT_D1_API_BASE_URL
 from conferir_ponto.settings import (
     append_settings_history,
     load_settings,
@@ -42,7 +44,13 @@ from conferir_ponto.settings import (
     save_settings,
     settings_to_payload,
 )
-from conferir_ponto.storage import ReportStorage, build_report_object_key, storage_from_env
+from conferir_ponto.storage import (
+    CloudflareBindingReportStorage,
+    R2ReportStorage,
+    ReportStorage,
+    build_report_object_key,
+    storage_from_env,
+)
 from conferir_ponto.timecard import (
     build_summary_payload,
     export_analysis_to_pdf,
@@ -931,9 +939,26 @@ def report_storage() -> ReportStorage:
 
 
 def cloudflare_runtime_bindings_status() -> dict[str, Any]:
+    client = d1_client()
+    storage = report_storage()
+    uses_native_d1 = bool(
+        client is not None
+        and getattr(client, "base_url", None)
+        and getattr(client, "base_url", None) != DEFAULT_D1_API_BASE_URL
+        and not (getattr(client, "account_id", None) and getattr(client, "database_id", None) and getattr(client, "api_token", None))
+    )
+    if isinstance(storage, CloudflareBindingReportStorage):
+        storage_mode = "native-binding"
+    elif isinstance(storage, R2ReportStorage):
+        storage_mode = "r2-api"
+    else:
+        storage_mode = "local"
+
     return {
-        "d1BindingName": os.getenv("D1_BINDING_NAME", "").strip() or None,
-        "r2BindingName": os.getenv("R2_BINDING_NAME", "").strip() or None,
+        "d1BindingName": os.getenv("D1_BINDING_NAME", "").strip() or ("Binding nativo da Cloudflare" if uses_native_d1 else None),
+        "d1Mode": "native-binding" if uses_native_d1 else ("api" if client is not None else "disabled"),
+        "r2BindingName": os.getenv("R2_BINDING_NAME", "").strip() or ("Binding nativo da Cloudflare" if storage_mode == "native-binding" else None),
+        "r2Mode": storage_mode,
         "r2BucketName": os.getenv("R2_BUCKET_NAME", "").strip() or None,
         "r2Region": os.getenv("R2_REGION", "").strip() or None,
     }

@@ -469,13 +469,15 @@
     const d1BindingName = status.d1BindingName || "—";
     const r2BindingName = status.r2BindingName || "—";
     const r2BucketName = status.r2BucketName || "—";
+    const d1Mode = status.d1Mode || "disabled";
+    const r2Mode = status.r2Mode || "local";
     const cards = [
       summaryCard("Backend atual", status.backend || "memory", "Estado visto pelo healthcheck do app."),
       summaryCard("Storage ativo", status.storageBackend || "local", "Backend atual dos arquivos de relatório."),
       summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando o binding nativo do D1 está configurado no Worker."),
       summaryCard("Modo de execução", status.runtimeMode || "memory", "Fluxo atual de persistência da aplicação."),
-      summaryCard("Binding D1", d1BindingName, "Nome do binding D1 conectado ao Worker."),
-      summaryCard("Binding R2", r2BindingName, "Nome do binding R2 conectado ao Worker."),
+      summaryCard("Binding D1", d1BindingName, d1Mode === "native-binding" ? "Integração nativa detectada automaticamente." : "Nome do binding D1 conectado ao Worker."),
+      summaryCard("Binding R2", r2BindingName, r2Mode === "native-binding" ? "Integração nativa detectada automaticamente." : "Nome do binding R2 conectado ao Worker."),
       summaryCard("Bucket R2", r2BucketName, "Bucket principal usado para PDFs e exportações."),
       summaryCard("Usuários no D1", String(d1Counts.users || 0), "Contas persistidas remotamente."),
       summaryCard("Relatórios no D1", String(d1Counts.reports || 0), "Apurações armazenadas no banco principal."),
