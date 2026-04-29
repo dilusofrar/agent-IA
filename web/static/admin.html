@@ -267,7 +267,7 @@
           <div class="panel-head panel-head-inline">
               <div>
                 <h3 id="admin-user-form-title">Novo usuário</h3>
-                <p class="muted">Crie ou atualize contas persistidas no D1, com hidratação automática do cache SQLite local.</p>
+                <p class="muted">Crie ou atualize contas persistidas diretamente no D1.</p>
               </div>
           </div>
           <form id="admin-user-form" class="admin-form" novalidate>
@@ -326,7 +326,7 @@
       <header class="panel-head">
         <div>
           <h3>Auditoria de usuários</h3>
-          <p class="muted">Criações e alterações de contas registradas no banco e refletidas no espelho do D1.</p>
+          <p class="muted">Criações e alterações de contas registradas diretamente no banco principal.</p>
         </div>
       </header>
       <div class="admin-panel-body">
@@ -337,8 +337,8 @@
     <section class="panel admin-users-panel">
       <header class="panel-head">
         <div>
-          <h3>Persistência híbrida</h3>
-          <p class="muted">Acompanhe a ponte entre SQLite local, R2 e o futuro D1 da Cloudflare.</p>
+          <h3>Persistência Cloudflare</h3>
+          <p class="muted">Acompanhe o estado atual do D1 e do R2 usados pela aplicação.</p>
         </div>
       </header>
       <div class="admin-panel-body admin-users-layout">
@@ -346,13 +346,12 @@
           <div class="panel-head panel-head-inline">
               <div>
                 <h3>Status do D1 e R2</h3>
-                <p class="muted">Use a sincronização para hidratar o cache local a partir do D1 e rode um teste real de gravação no storage para validar o bucket do R2.</p>
+                <p class="muted">Rode um teste real de gravação no storage para validar o bucket do R2 e acompanhe o backend ativo.</p>
               </div>
             </div>
             <div id="admin-persistence-summary" class="insights-grid"></div>
             <div class="admin-actions">
               <button id="admin-storage-check" type="button" class="btn btn-secondary">Testar escrita no R2</button>
-              <button id="admin-d1-sync" type="button" class="btn btn-primary">Sincronizar Banco de dados D1</button>
             </div>
           <div id="admin-persistence-status" class="status" role="status" aria-live="polite" hidden></div>
         </section>
@@ -360,8 +359,8 @@
         <section class="admin-users-list-shell">
           <div class="panel-head panel-head-inline">
             <div>
-              <h3>Resumo da sincronização</h3>
-                <p class="muted">Quando o D1 estiver ativo, este painel mostra o backend atual e o resultado da hidratação do cache local.</p>
+              <h3>Resumo técnico</h3>
+                <p class="muted">Este painel mostra o backend atual e o resultado do diagnóstico de storage da aplicação.</p>
             </div>
           </div>
           <pre id="admin-persistence-json" class="admin-persistence-json">Aguardando configuração do D1.</pre>

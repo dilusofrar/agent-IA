@@ -298,7 +298,7 @@ async def admin_persistence_status(request: Request) -> JSONResponse:
             **d1_status(),
             "recordCounts": persistence_record_counts(),
             "storageBackend": report_storage().backend_name,
-            "runtimeMode": "d1-only" if d1_status().get("enabled") else "sqlite",
+            "runtimeMode": "d1-only" if d1_status().get("enabled") else "memory",
         }
     )
 
@@ -316,30 +316,10 @@ async def admin_storage_diagnostics(request: Request) -> JSONResponse:
                 "recordCounts": persistence_record_counts(),
                 "storageBackend": report_storage().backend_name,
                 "storageProbe": diagnostics,
-                "runtimeMode": "d1-only" if d1_status().get("enabled") else "sqlite",
+                "runtimeMode": "d1-only" if d1_status().get("enabled") else "memory",
             },
         },
         status_code=status_code,
-    )
-
-
-@app.post("/api/admin/persistence/sync-d1")
-async def admin_sync_d1(request: Request) -> JSONResponse:
-    ensure_admin(request)
-    if not d1_status().get("enabled"):
-        raise HTTPException(status_code=400, detail="D1 não configurado.")
-    return JSONResponse(
-        {
-            "synced": False,
-            "deprecated": True,
-            "summary": {"settingsCurrent": 0, "settingsAudit": 0, "reports": 0, "users": 0, "userAudit": 0},
-            "detail": "SQLite cache desativado em modo Cloudflare nativo.",
-            "status": {
-                **d1_status(),
-                "recordCounts": persistence_record_counts(),
-                "runtimeMode": "d1-only",
-            },
-        }
     )
 
 

@@ -8,7 +8,7 @@ This repository is now prepared for a full migration from Render to Cloudflare C
 - Cloudflare Container: runs the existing FastAPI + PDF processing app.
 - Cloudflare D1: primary database for users, reports, settings and audits.
 - Cloudflare R2: primary object storage for PDFs and generated exports.
-- Local SQLite inside the app: warm cache/fallback hydrated from D1 at startup.
+- In-memory fallback only for emergency runtime scenarios when D1 is unavailable.
 
 ## Why this structure
 
@@ -95,16 +95,6 @@ For dashboard-based deployments, split configuration in two places:
   - `R2_BINDING_NAME`
   - `R2_BUCKET_NAME` (optional, for diagnostics/location display)
   - `R2_REGION`
-
-Legacy compatibility mode is still supported if you need rollback without native bindings:
-
-- `D1_ACCOUNT_ID`
-- `D1_DATABASE_ID`
-- `D1_API_TOKEN`
-- `D1_API_BASE_URL` (optional)
-- `R2_ENDPOINT_URL`
-- `R2_ACCESS_KEY_ID`
-- `R2_SECRET_ACCESS_KEY`
 
 ## First deployment steps
 

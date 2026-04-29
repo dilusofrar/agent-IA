@@ -14,7 +14,7 @@ SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from conferir_ponto.persistence import create_user
+from conferir_ponto.persistence import create_user, reset_memory_store
 import conferir_ponto.persistence as persistence_module
 from conferir_ponto.d1_api import D1ApiClient, d1_from_env
 from conferir_ponto.storage import CloudflareBindingReportStorage, LocalReportStorage, storage_from_env
@@ -27,18 +27,12 @@ class WebAppTests(unittest.TestCase):
         REPORTS.clear()
         web_module._REPORT_STORAGE = None
         persistence_module._D1_CLIENT = False
-        self._temp_dir = TemporaryDirectory()
-        self._db_patcher = patch(
-            "conferir_ponto.persistence.APP_DB_PATH",
-            Path(self._temp_dir.name) / "app.db",
-        )
-        self._db_patcher.start()
+        reset_memory_store()
 
     def tearDown(self):
-        self._db_patcher.stop()
         web_module._REPORT_STORAGE = None
         persistence_module._D1_CLIENT = False
-        self._temp_dir.cleanup()
+        reset_memory_store()
 
     def login_admin(self, client: TestClient, username: str = "admin", password: str = "secret123"):
         return client.post(
@@ -340,7 +334,7 @@ class WebAppTests(unittest.TestCase):
                 if self.query_calls == 1:
                     raise RuntimeError(
                         'D1 HTTP error 400: {"messages":[],"result":[],"success":false,'
-                        '"errors":[{"code":7500,"message":"no such table: user_audit: SQLITE_ERROR"}]}'
+                        '"errors":[{"code":7500,"message":"no such table: user_audit"}]}'
                     )
                 return [
                     {
@@ -377,7 +371,7 @@ class WebAppTests(unittest.TestCase):
                 if self.query_calls == 1:
                     raise RuntimeError(
                         'D1 HTTP error 400: {"messages":[],"result":[],"success":false,'
-                        '"errors":[{"code":7500,"message":"no such column: actor at offset 28: SQLITE_ERROR"}]}'
+                        '"errors":[{"code":7500,"message":"no such column: actor at offset 28"}]}'
                     )
                 return [
                     {
@@ -525,71 +519,62 @@ class WebAppTests(unittest.TestCase):
         self.assertFalse(updated_user["isActive"])
 
     def test_update_user_uses_d1_state_as_source_of_truth(self):
-        with TemporaryDirectory() as temp_dir:
-            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
-                "conferir_ponto.persistence.mirror_execute"
-            ), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
-                create_user(
-                    username="operador",
-                    password_hash=hash_password("senha123"),
-                    role="user",
-                    display_name="Operador",
+        with patch("conferir_ponto.persistence.mirror_execute"), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+            create_user(
+                username="operador",
+                password_hash=hash_password("senha123"),
+                role="user",
+                display_name="Operador",
+            )
+            persistence_module._D1_CLIENT = SimpleNamespace()
+            remote_row = {
+                "id": "remote-operador",
+                "username": "operador",
+                "email": "operador@empresa.com",
+                "display_name": "Operador Remoto",
+                "password_hash": None,
+                "role": "user",
+                "is_active": 1,
+                "created_at": "2026-04-24T00:00:00",
+                "updated_at": "2026-04-24T00:00:00",
+            }
+            with patch("conferir_ponto.persistence.mirror_fetch_one", return_value=remote_row):
+                updated = persistence_module.update_user(
+                    "operador",
+                    display_name="Operador Atualizado",
+                    email="operador@empresa.com",
                 )
-                persistence_module._D1_CLIENT = SimpleNamespace()
-                remote_row = {
-                    "id": "remote-operador",
-                    "username": "operador",
-                    "email": "operador@empresa.com",
-                    "display_name": "Operador Remoto",
-                    "password_hash": None,
-                    "role": "user",
-                    "is_active": 1,
-                    "created_at": "2026-04-24T00:00:00",
-                    "updated_at": "2026-04-24T00:00:00",
-                }
-                with patch("conferir_ponto.persistence.mirror_fetch_one", return_value=remote_row):
-                    updated = persistence_module.update_user(
-                        "operador",
-                        display_name="Operador Atualizado",
-                        email="operador@empresa.com",
-                    )
 
-                self.assertEqual(updated["displayName"], "Operador Remoto")
-                self.assertIsNone(updated["passwordHash"])
+            self.assertEqual(updated["displayName"], "Operador Remoto")
+            self.assertIsNone(updated["passwordHash"])
 
     def test_load_user_returns_none_when_missing_from_d1(self):
-        with TemporaryDirectory() as temp_dir:
-            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
-                "conferir_ponto.persistence.mirror_execute"
-            ), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
-                create_user(
-                    username="operador",
-                    password_hash=hash_password("senha123"),
-                    role="user",
-                    display_name="Operador",
-                )
-                persistence_module._D1_CLIENT = SimpleNamespace()
-                with patch("conferir_ponto.persistence.mirror_fetch_one", return_value=None):
-                    user = persistence_module.load_user_by_username("operador")
+        with patch("conferir_ponto.persistence.mirror_execute"), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+            create_user(
+                username="operador",
+                password_hash=hash_password("senha123"),
+                role="user",
+                display_name="Operador",
+            )
+            persistence_module._D1_CLIENT = SimpleNamespace()
+            with patch("conferir_ponto.persistence.mirror_fetch_one", return_value=None):
+                user = persistence_module.load_user_by_username("operador")
 
-                self.assertIsNone(user)
+            self.assertIsNone(user)
 
     def test_list_users_reads_exclusively_from_d1_when_enabled(self):
-        with TemporaryDirectory() as temp_dir:
-            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"), patch(
-                "conferir_ponto.persistence.mirror_execute"
-            ), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
-                create_user(
-                    username="operador",
-                    password_hash=hash_password("senha123"),
-                    role="user",
-                    display_name="Operador",
-                )
-                persistence_module._D1_CLIENT = SimpleNamespace()
-                with patch("conferir_ponto.persistence.mirror_fetch_all", return_value=[]):
-                    items = persistence_module.list_users()
+        with patch("conferir_ponto.persistence.mirror_execute"), patch.dict("os.environ", {"D1_PREFER_READS": "true"}, clear=False):
+            create_user(
+                username="operador",
+                password_hash=hash_password("senha123"),
+                role="user",
+                display_name="Operador",
+            )
+            persistence_module._D1_CLIENT = SimpleNamespace()
+            with patch("conferir_ponto.persistence.mirror_fetch_all", return_value=[]):
+                items = persistence_module.list_users()
 
-                self.assertEqual(items, [])
+            self.assertEqual(items, [])
 
     def test_list_users_reads_users_directly_from_d1_primary(self):
         class FakeD1Client:
@@ -636,7 +621,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(items[0]["id"], "uuid-user-1")
         self.assertEqual(items[1]["id"], "uuid-user-2")
 
-    def test_list_users_can_hydrate_local_cache_from_d1_rows(self):
+    def test_list_users_can_read_d1_rows_directly(self):
         class FakeD1Client:
             def query(self, sql, params=None):
                 normalized = " ".join(str(sql).split()).lower()
@@ -665,7 +650,6 @@ class WebAppTests(unittest.TestCase):
 
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["username"], "operador")
-        self.assertEqual(persistence_module.load_user_by_username("operador")["username"], "operador")
 
     def test_list_users_recovers_when_user_audit_column_is_missing_elsewhere(self):
         class FakeD1Client:
@@ -709,23 +693,25 @@ class WebAppTests(unittest.TestCase):
             response = client.get("/api/admin/persistence")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["backend"], "sqlite")
+        self.assertEqual(response.json()["backend"], "memory")
         self.assertEqual(response.json()["storageBackend"], "local")
-        self.assertEqual(response.json()["runtimeMode"], "sqlite")
+        self.assertEqual(response.json()["runtimeMode"], "memory")
         self.assertFalse(response.json()["enabled"])
-        self.assertEqual(response.json()["recordCounts"]["backend"], "sqlite")
+        self.assertEqual(response.json()["recordCounts"]["backend"], "memory")
         self.assertEqual(
-            response.json()["recordCounts"]["d1"],
             {
-                "users": 0,
+                key: response.json()["recordCounts"]["d1"][key]
+                for key in ("userAudit", "reports", "settingsCurrent", "settingsAudit")
+            },
+            {
                 "userAudit": 0,
                 "reports": 0,
                 "settingsCurrent": 0,
                 "settingsAudit": 0,
             },
         )
-        self.assertIn("sqlite", response.json()["recordCounts"])
-        self.assertGreaterEqual(response.json()["recordCounts"]["sqlite"]["users"], 0)
+        self.assertGreaterEqual(response.json()["recordCounts"]["d1"]["users"], 1)
+        self.assertIn("d1", response.json()["recordCounts"])
 
     def test_admin_can_run_storage_diagnostics(self):
         class FakeStorage:
@@ -758,38 +744,6 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(payload["status"]["storageBackend"], "r2")
         self.assertEqual(payload["status"]["storageProbe"]["bucket"], "rendflare")
 
-    def test_sync_d1_requires_configuration(self):
-        client = TestClient(app)
-
-        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False):
-            self.login_admin(client)
-            response = client.post("/api/admin/persistence/sync-d1")
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("D1", response.json()["detail"])
-
-    def test_sync_d1_hydrates_local_cache_from_remote(self):
-        client = TestClient(app)
-
-        with patch.dict("os.environ", {"ADMIN_PASSWORD": "secret123"}, clear=False), patch(
-            "conferir_ponto.web.d1_status",
-            return_value={
-                "enabled": True,
-                "backend": "d1",
-                "preferReads": True,
-                "databaseId": "db-id",
-                "accountId": "account-id",
-            },
-        ):
-            self.login_admin(client)
-            response = client.post("/api/admin/persistence/sync-d1")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["synced"])
-        self.assertTrue(response.json()["deprecated"])
-        self.assertIn("SQLite cache desativado", response.json()["detail"])
-        self.assertEqual(response.json()["status"]["runtimeMode"], "d1-only")
-
     def test_healthcheck_returns_security_headers(self):
         client = TestClient(app)
 
@@ -798,7 +752,7 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["version"], "1.16.8")
         self.assertEqual(response.json()["storageBackend"], "local")
-        self.assertEqual(response.json()["persistenceBackend"], "sqlite")
+        self.assertEqual(response.json()["persistenceBackend"], "memory")
         self.assertEqual(response.headers["x-frame-options"], "DENY")
         self.assertIn("frame-ancestors 'none'", response.headers["content-security-policy"])
 
@@ -1405,16 +1359,14 @@ class WebHelpersTests(unittest.TestCase):
             def ensure_schema(self, *, force=False):
                 return None
 
-        with TemporaryDirectory() as temp_dir:
-            with patch("conferir_ponto.persistence.APP_DB_PATH", Path(temp_dir) / "app.db"):
-                fake_d1 = FakeD1Client()
-                persistence_module._D1_CLIENT = fake_d1
+        fake_d1 = FakeD1Client()
+        persistence_module._D1_CLIENT = fake_d1
 
-                updated = persistence_module.update_user(
-                    "operador",
-                    role="admin",
-                    display_name="Operador Lider",
-                )
+        updated = persistence_module.update_user(
+            "operador",
+            role="admin",
+            display_name="Operador Lider",
+        )
 
         sql = fake_d1.calls[-1][0]
         self.assertIn("ON CONFLICT(username) DO UPDATE", sql)

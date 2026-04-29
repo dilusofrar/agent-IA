@@ -19,7 +19,6 @@
   const persistenceSummary = document.getElementById("admin-persistence-summary");
   const persistenceStatus = document.getElementById("admin-persistence-status");
   const persistenceJson = document.getElementById("admin-persistence-json");
-  const d1SyncButton = document.getElementById("admin-d1-sync");
   const storageCheckButton = document.getElementById("admin-storage-check");
 
   if (loginForm) {
@@ -47,10 +46,6 @@
 
   if (logoutButton) {
     logoutButton.addEventListener("click", handleLogout);
-  }
-
-  if (d1SyncButton) {
-    d1SyncButton.addEventListener("click", handleD1Sync);
   }
 
   if (storageCheckButton) {
@@ -145,7 +140,7 @@
       setStatus(
         persistenceStatus,
         payload.enabled ? "success" : "error",
-        payload.enabled ? "D1 pronto para hidratar o cache SQLite." : "D1 ainda não configurado.",
+        payload.enabled ? "D1 pronto para uso em produção." : "D1 ainda não configurado.",
       );
     } catch (error) {
       setStatus(persistenceStatus, "error", error.message || "Falha ao carregar persistência.");
@@ -244,24 +239,6 @@
       renderUserHistory(payload.items || []);
     } catch (error) {
       renderUserHistory([]);
-    }
-  }
-
-  async function handleD1Sync() {
-    setStatus(persistenceStatus, "loading", "Sincronizando dados do D1 para o cache SQLite...");
-    try {
-      const response = await fetch("/api/admin/persistence/sync-d1", { method: "POST" });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.detail || "Falha ao sincronizar D1 para SQLite.");
-      }
-      renderPersistenceStatus(payload.status || {});
-      if (persistenceJson) {
-        persistenceJson.textContent = JSON.stringify(payload, null, 2);
-      }
-      setStatus(persistenceStatus, "success", "Sincronização do D1 para SQLite concluída com sucesso.");
-    } catch (error) {
-      setStatus(persistenceStatus, "error", error.message || "Falha ao sincronizar D1 para SQLite.");
     }
   }
 
@@ -489,28 +466,18 @@
     const storageProbe = status.storageProbe || null;
     const recordCounts = status.recordCounts || {};
     const d1Counts = recordCounts.d1 || {};
-    const sqliteCounts = recordCounts.sqlite || {};
-    const drift = status.drift || {};
-    const mismatches = Array.isArray(drift.mismatches) ? drift.mismatches : [];
     const cards = [
-      summaryCard("Backend atual", status.backend || "sqlite", "Estado visto pelo healthcheck do app."),
+      summaryCard("Backend atual", status.backend || "memory", "Estado visto pelo healthcheck do app."),
       summaryCard("Storage ativo", status.storageBackend || "local", "Backend atual dos arquivos de relatório."),
-      summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando as variáveis D1 estão configuradas no Render."),
-      summaryCard("Leitura preferida", status.preferReads ? "D1" : "SQLite", "Quando ativo, o app lê primeiro do D1 e usa SQLite apenas como fallback/cache."),
+      summaryCard("D1 ativo", status.enabled ? "Sim" : "Não", "Ativa quando o binding nativo do D1 está configurado no Worker."),
+      summaryCard("Modo de execução", status.runtimeMode || "memory", "Fluxo atual de persistência da aplicação."),
       summaryCard("Database ID", status.databaseId || "—", "Identificador do banco D1 vinculado."),
       summaryCard("Account ID", status.accountId || "—", "Conta Cloudflare usada para a API do D1."),
       summaryCard("Usuários no D1", String(d1Counts.users || 0), "Contas persistidas remotamente."),
       summaryCard("Relatórios no D1", String(d1Counts.reports || 0), "Apurações armazenadas no banco principal."),
       summaryCard("Regras atuais no D1", String(d1Counts.settingsCurrent || 0), "Escopos persistidos em settings_current."),
       summaryCard("Auditoria no D1", String((d1Counts.settingsAudit || 0) + (d1Counts.userAudit || 0)), "Soma de settings_audit e user_audit."),
-      summaryCard("Cache SQLite", String(sqliteCounts.users || 0) + " usuários", "Espelho local hidratado a partir do D1."),
-      summaryCard(
-        "Sincronização",
-        drift.inSync ? "Alinhado" : "Divergente",
-        drift.inSync
-          ? "As contagens do cache local batem com o D1."
-          : buildDriftNote(mismatches),
-      ),
+      summaryCard("Fallback local", status.runtimeMode === "memory" ? "Ativo" : "Inativo", "Usado apenas quando o D1 não está disponível."),
     ];
     if (storageProbe) {
       cards.push(
@@ -574,17 +541,6 @@
       createElement("span", { className: "insight-note", text: note }),
     );
     return card;
-  }
-
-  function buildDriftNote(mismatches) {
-    if (!mismatches.length) {
-      return "Sem divergências detectadas.";
-    }
-    return mismatches
-      .map(function (item) {
-        return item.table + " D1 " + item.d1 + " / SQLite " + item.sqlite;
-      })
-      .join(" · ");
   }
 
   function populateJourneySchedule(code, settings) {
