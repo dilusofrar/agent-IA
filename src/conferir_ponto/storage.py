@@ -204,7 +204,7 @@ class CloudflareBindingReportStorage:
             self._url_for(key),
             data=content,
             headers={"Content-Type": "application/octet-stream"},
-            method="PUT",
+            method="POST",
         )
         self._open(request).read()
         return StoredObject(key=key, location=self._location_for(key))
