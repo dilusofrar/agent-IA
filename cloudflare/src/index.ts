@@ -109,6 +109,7 @@ function buildContainerEnv(env: Env): Record<string, string> {
     D1_API_BASE_URL: getNativeD1BaseUrl(env),
     R2_BINDING_NAME: undefined,
     R2_ENDPOINT_URL: env.R2_ENDPOINT_URL,
+    R2_BUCKET_NAME: env.R2_BUCKET_NAME,
     R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID,
     R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY,
     R2_REGION: env.R2_REGION ?? "auto"
@@ -151,7 +152,7 @@ async function getPrimaryContainer(env: Env) {
       envVars: buildContainerEnv(env)
     },
     cancellationOptions: {
-      portReadyTimeoutMS: 45_000
+      portReadyTimeoutMS: 90_000
     }
   });
   return container;
