@@ -284,6 +284,10 @@ class CloudflareBindingReportStorage:
     def _open(self, request: Request):
         try:
             return urlopen(request, timeout=20)
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            detail = body or exc.reason
+            raise RuntimeError(f"R2 binding HTTP error {exc.code}: {detail}") from exc
         except URLError as exc:
             raise RuntimeError(f"R2 binding connection error: {exc.reason}") from exc
 

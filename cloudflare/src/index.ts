@@ -191,11 +191,16 @@ AgentIaPontoContainer.outboundByHost = {
       const bucket = getR2Binding(env);
       const url = new URL(request.url);
       const key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+      console.log("r2_outbound_request", {
+        method: request.method,
+        url: request.url,
+        key
+      });
       if (!key) {
         return new Response("Missing object key.", { status: 400 });
       }
 
-      if (request.method === "PUT") {
+      if (request.method === "PUT" || request.method === "POST") {
         const body = await request.arrayBuffer();
         await bucket.put(key, body, {
           httpMetadata: request.headers.get("content-type")
