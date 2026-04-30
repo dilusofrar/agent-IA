@@ -208,7 +208,8 @@ class CloudflareBindingReportStorage:
                 "key": key,
                 "bodyBase64": b64encode(content).decode("ascii"),
                 "contentType": "application/octet-stream",
-            }
+            },
+            operation_name="put",
         )
         return StoredObject(key=key, location=self._location_for(key))
 
@@ -219,6 +220,7 @@ class CloudflareBindingReportStorage:
                 "operation": "get",
                 "key": key,
             },
+            operation_name="get",
             allow_not_found=True,
         )
         if payload is None:
@@ -234,7 +236,8 @@ class CloudflareBindingReportStorage:
                 "__binding": "r2",
                 "operation": "delete",
                 "key": key,
-            }
+            },
+            operation_name="delete",
         )
 
     def exists(self, key: str) -> bool:
@@ -244,6 +247,7 @@ class CloudflareBindingReportStorage:
                 "operation": "head",
                 "key": key,
             },
+            operation_name="head",
             allow_not_found=True,
         )
         return bool(payload and payload.get("success"))
@@ -251,10 +255,14 @@ class CloudflareBindingReportStorage:
     def probe(self) -> dict[str, object]:
         probe_key = f"_storage_probe/{int(time())}-{uuid4().hex}.txt"
         payload = f"r2-storage-probe:{probe_key}".encode("utf-8")
+        write_ok = False
+        read_ok = False
         delete_ok = False
         try:
             stored = self.write_bytes(probe_key, payload)
+            write_ok = True
             read_back = self.read_bytes(probe_key)
+            read_ok = read_back == payload
             try:
                 self.delete(probe_key)
                 delete_ok = not self.exists(probe_key)
@@ -266,12 +274,12 @@ class CloudflareBindingReportStorage:
                         pass
             return {
                 "backend": self.backend_name,
-                "ok": read_back == payload and delete_ok,
+                "ok": write_ok and read_ok and delete_ok,
                 "bucket": self.bucket_name or None,
                 "key": probe_key,
                 "location": stored.location,
-                "writeOk": True,
-                "readOk": read_back == payload,
+                "writeOk": write_ok,
+                "readOk": read_ok,
                 "deleteOk": delete_ok,
             }
         except Exception as exc:
@@ -280,9 +288,9 @@ class CloudflareBindingReportStorage:
                 "ok": False,
                 "bucket": self.bucket_name or None,
                 "key": probe_key,
-                "writeOk": False,
-                "readOk": False,
-                "deleteOk": False,
+                "writeOk": write_ok,
+                "readOk": read_ok,
+                "deleteOk": delete_ok,
                 "error": str(exc),
             }
 
@@ -294,7 +302,13 @@ class CloudflareBindingReportStorage:
         bucket = self.bucket_name or "binding"
         return f"r2://{bucket}/{key}"
 
-    def _rpc(self, payload: dict[str, object], *, allow_not_found: bool = False) -> dict[str, object] | None:
+    def _rpc(
+        self,
+        payload: dict[str, object],
+        *,
+        operation_name: str,
+        allow_not_found: bool = False,
+    ) -> dict[str, object] | None:
         request = Request(
             self.endpoint_url,
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -310,9 +324,9 @@ class CloudflareBindingReportStorage:
                 return None
             body = exc.read().decode("utf-8", errors="replace")
             detail = body or exc.reason
-            raise RuntimeError(f"R2 binding HTTP error {exc.code}: {detail}") from exc
+            raise RuntimeError(f"R2 binding {operation_name} HTTP error {exc.code}: {detail}") from exc
         except URLError as exc:
-            raise RuntimeError(f"R2 binding connection error: {exc.reason}") from exc
+            raise RuntimeError(f"R2 binding {operation_name} connection error: {exc.reason}") from exc
 
 
 def storage_from_env(root_dir: Path) -> ReportStorage:
