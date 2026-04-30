@@ -196,7 +196,12 @@ AgentIaPontoContainer.outboundByHost = {
       }
 
       if (request.method === "PUT") {
-        await bucket.put(key, request.body);
+        const body = await request.arrayBuffer();
+        await bucket.put(key, body, {
+          httpMetadata: request.headers.get("content-type")
+            ? { contentType: request.headers.get("content-type") ?? undefined }
+            : undefined
+        });
         return new Response(null, { status: 204 });
       }
 
@@ -225,6 +230,12 @@ AgentIaPontoContainer.outboundByHost = {
 
       return new Response("Method Not Allowed", { status: 405 });
     } catch (error) {
+      console.error("r2_outbound_error", {
+        method: request.method,
+        url: request.url,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       return new Response(error instanceof Error ? error.message : String(error), { status: 500 });
     }
   }
