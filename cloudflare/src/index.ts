@@ -26,7 +26,6 @@ type Env = {
 const DEFAULT_CONTAINER_PORT = "8000";
 const PRIMARY_INSTANCE_NAME = "primary";
 const D1_OUTBOUND_HOST = "d1.binding";
-const R2_OUTBOUND_HOST = "cf-r2.internal";
 
 export class AgentIaPontoContainer extends Container {
   defaultPort = 8000;
@@ -82,7 +81,7 @@ function getNativeD1BaseUrl(env: Env): string | undefined {
 }
 
 function getNativeR2EndpointUrl(env: Env): string | undefined {
-  return getR2BindingName(env) ? `http://${R2_OUTBOUND_HOST}` : env.R2_ENDPOINT_URL;
+  return getR2BindingName(env) ? `http://${D1_OUTBOUND_HOST}/r2` : env.R2_ENDPOINT_URL;
 }
 
 function buildContainerEnv(env: Env): Record<string, string> {
@@ -141,13 +140,61 @@ function isD1ReadQuery(sql: string): boolean {
 AgentIaPontoContainer.outboundByHost = {
   [D1_OUTBOUND_HOST]: async (request, env) => {
     try {
+      const url = new URL(request.url);
+      if (url.pathname === "/r2" || url.pathname.startsWith("/r2/")) {
+        const bucket = getR2Binding(env);
+        const key = decodeURIComponent(url.pathname.replace(/^\/r2\/?/, ""));
+        console.log("r2_outbound_request", {
+          method: request.method,
+          url: request.url,
+          key
+        });
+        if (!key) {
+          return new Response("Missing object key.", { status: 400 });
+        }
+
+        if (request.method === "PUT" || request.method === "POST") {
+          const body = await request.arrayBuffer();
+          await bucket.put(key, body, {
+            httpMetadata: request.headers.get("content-type")
+              ? { contentType: request.headers.get("content-type") ?? undefined }
+              : undefined
+          });
+          return new Response(null, { status: 204 });
+        }
+
+        if (request.method === "GET") {
+          const object = await bucket.get(key);
+          if (!object) {
+            return new Response(null, { status: 404 });
+          }
+          return new Response(object.body, {
+            status: 200,
+            headers: object.httpMetadata?.contentType
+              ? { "Content-Type": object.httpMetadata.contentType }
+              : undefined
+          });
+        }
+
+        if (request.method === "HEAD") {
+          const object = await bucket.head(key);
+          return new Response(null, { status: object ? 200 : 404 });
+        }
+
+        if (request.method === "DELETE") {
+          await bucket.delete(key);
+          return new Response(null, { status: 204 });
+        }
+
+        return new Response("Method Not Allowed", { status: 405 });
+      }
+
       if (request.method !== "POST") {
         return Response.json(
           { success: false, errors: [{ message: "Method Not Allowed" }] },
           { status: 405 }
         );
       }
-      const url = new URL(request.url);
       if (url.pathname !== "/query") {
         return Response.json(
           { success: false, errors: [{ message: "Not Found" }] },
@@ -186,64 +233,6 @@ AgentIaPontoContainer.outboundByHost = {
       );
     }
   },
-  [R2_OUTBOUND_HOST]: async (request, env) => {
-    try {
-      const bucket = getR2Binding(env);
-      const url = new URL(request.url);
-      const key = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
-      console.log("r2_outbound_request", {
-        method: request.method,
-        url: request.url,
-        key
-      });
-      if (!key) {
-        return new Response("Missing object key.", { status: 400 });
-      }
-
-      if (request.method === "PUT" || request.method === "POST") {
-        const body = await request.arrayBuffer();
-        await bucket.put(key, body, {
-          httpMetadata: request.headers.get("content-type")
-            ? { contentType: request.headers.get("content-type") ?? undefined }
-            : undefined
-        });
-        return new Response(null, { status: 204 });
-      }
-
-      if (request.method === "GET") {
-        const object = await bucket.get(key);
-        if (!object) {
-          return new Response(null, { status: 404 });
-        }
-        return new Response(object.body, {
-          status: 200,
-          headers: object.httpMetadata?.contentType
-            ? { "Content-Type": object.httpMetadata.contentType }
-            : undefined
-        });
-      }
-
-      if (request.method === "HEAD") {
-        const object = await bucket.head(key);
-        return new Response(null, { status: object ? 200 : 404 });
-      }
-
-      if (request.method === "DELETE") {
-        await bucket.delete(key);
-        return new Response(null, { status: 204 });
-      }
-
-      return new Response("Method Not Allowed", { status: 405 });
-    } catch (error) {
-      console.error("r2_outbound_error", {
-        method: request.method,
-        url: request.url,
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
-      return new Response(error instanceof Error ? error.message : String(error), { status: 500 });
-    }
-  }
 };
 
 export default {
