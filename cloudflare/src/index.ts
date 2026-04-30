@@ -140,17 +140,10 @@ function isD1ReadQuery(sql: string): boolean {
 AgentIaPontoContainer.outboundByHost = {
   [D1_OUTBOUND_HOST]: async (request, env) => {
     try {
-      const url = new URL(request.url);
       if (request.method !== "POST") {
         return Response.json(
           { success: false, errors: [{ message: "Method Not Allowed" }] },
           { status: 405 }
-        );
-      }
-      if (url.pathname !== "/query") {
-        return Response.json(
-          { success: false, errors: [{ message: "Not Found" }] },
-          { status: 404 }
         );
       }
       const payload = (await request.json()) as
