@@ -8,13 +8,11 @@
   },
   "vars": {
     "ADMIN_USERNAME": "diegoluks",
-    "D1_BINDING_NAME": "D1",
     "ENABLE_API_DOCS": "false",
     "PORT": "8000",
     "PYTHONPATH": "/app/src",
     "R2_BUCKET_NAME": "rendflare",
-    "R2_REGION": "auto",
-    "R2_ENDPOINT_URL": "https://6984ceb902d1604548a6b113c6f8e780.r2.cloudflarestorage.com"
+    "R2_REGION": "auto"
   },
   "d1_databases": [
     {

@@ -11,12 +11,10 @@ type Env = {
   ADMIN_PASSWORD?: string;
   ADMIN_SESSION_SECRET?: string;
   APP_SESSION_SECRET?: string;
-  D1_BINDING_NAME?: string;
   D1_ACCOUNT_ID?: string;
   D1_DATABASE_ID?: string;
   D1_API_TOKEN?: string;
   D1_API_BASE_URL?: string;
-  R2_BINDING_NAME?: string;
   R2_ENDPOINT_URL?: string;
   R2_BUCKET_NAME?: string;
   R2_ACCESS_KEY_ID?: string;
@@ -51,13 +49,9 @@ function isR2BucketBinding(value: unknown): value is R2Bucket {
 
 function discoverBindingName(
   env: Env,
-  configuredName: string | undefined,
   predicate: (value: unknown) => boolean,
   label: string
 ): string | undefined {
-  if (configuredName) {
-    return configuredName;
-  }
   const matches = Object.entries(env)
     .filter(([, value]) => predicate(value))
     .map(([name]) => name)
@@ -74,11 +68,11 @@ function discoverBindingName(
 }
 
 function getD1BindingName(env: Env): string | undefined {
-  return discoverBindingName(env, env.D1_BINDING_NAME, isD1DatabaseBinding, "D1");
+  return discoverBindingName(env, isD1DatabaseBinding, "D1");
 }
 
 function getR2BindingName(env: Env): string | undefined {
-  return discoverBindingName(env, env.R2_BINDING_NAME, isR2BucketBinding, "R2");
+  return discoverBindingName(env, isR2BucketBinding, "R2");
 }
 
 function getNativeD1BaseUrl(env: Env): string | undefined {
@@ -86,14 +80,14 @@ function getNativeD1BaseUrl(env: Env): string | undefined {
 }
 
 function getNativeR2EndpointUrl(env: Env): string | undefined {
-  return env.R2_ENDPOINT_URL;
+  return getR2BindingName(env) ? `http://${R2_OUTBOUND_HOST}` : env.R2_ENDPOINT_URL;
 }
 
 function buildContainerEnv(env: Env): Record<string, string> {
   const d1BindingName = getD1BindingName(env);
   const r2BindingName = getR2BindingName(env);
   const useNativeD1Binding = Boolean(d1BindingName);
-  const useNativeR2Binding = false;
+  const useNativeR2Binding = Boolean(r2BindingName);
   return compactEnv({
     PORT: env.PORT ?? DEFAULT_CONTAINER_PORT,
     PYTHONPATH: env.PYTHONPATH ?? "/app/src",
@@ -102,16 +96,14 @@ function buildContainerEnv(env: Env): Record<string, string> {
     ADMIN_PASSWORD: env.ADMIN_PASSWORD,
     ADMIN_SESSION_SECRET: env.ADMIN_SESSION_SECRET,
     APP_SESSION_SECRET: env.APP_SESSION_SECRET,
-    D1_BINDING_NAME: d1BindingName,
     D1_ACCOUNT_ID: useNativeD1Binding ? undefined : env.D1_ACCOUNT_ID,
     D1_DATABASE_ID: useNativeD1Binding ? undefined : env.D1_DATABASE_ID,
     D1_API_TOKEN: useNativeD1Binding ? undefined : env.D1_API_TOKEN,
     D1_API_BASE_URL: getNativeD1BaseUrl(env),
-    R2_BINDING_NAME: undefined,
-    R2_ENDPOINT_URL: env.R2_ENDPOINT_URL,
+    R2_ENDPOINT_URL: getNativeR2EndpointUrl(env),
     R2_BUCKET_NAME: env.R2_BUCKET_NAME,
-    R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID,
-    R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY,
+    R2_ACCESS_KEY_ID: useNativeR2Binding ? undefined : env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: useNativeR2Binding ? undefined : env.R2_SECRET_ACCESS_KEY,
     R2_REGION: env.R2_REGION ?? "auto"
   });
 }

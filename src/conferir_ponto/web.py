@@ -955,9 +955,7 @@ def cloudflare_runtime_bindings_status() -> dict[str, Any]:
         storage_mode = "local"
 
     return {
-        "d1BindingName": os.getenv("D1_BINDING_NAME", "").strip() or ("Binding nativo da Cloudflare" if uses_native_d1 else None),
         "d1Mode": "native-binding" if uses_native_d1 else ("api" if client is not None else "disabled"),
-        "r2BindingName": os.getenv("R2_BINDING_NAME", "").strip() or ("Binding nativo da Cloudflare" if storage_mode == "native-binding" else None),
         "r2Mode": storage_mode,
         "r2BucketName": os.getenv("R2_BUCKET_NAME", "").strip() or None,
         "r2Region": os.getenv("R2_REGION", "").strip() or None,
