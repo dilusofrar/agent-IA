@@ -1,3 +1,4 @@
+import { env as workerEnv } from "cloudflare:workers";
 import { Container, ContainerProxy, getContainer } from "@cloudflare/containers";
 
 export { ContainerProxy };
@@ -32,11 +33,12 @@ export class AgentIaPontoContainer extends Container {
   sleepAfter = "10m";
   pingEndpoint = "localhost/healthz";
 
-  override async fetch(request: Request, env: Env): Promise<Response> {
+  override async fetch(request: Request): Promise<Response> {
+    const runtimeEnv = workerEnv as Env;
     await this.startAndWaitForPorts({
       ports: 8000,
       startOptions: {
-        envVars: buildContainerEnv(env)
+        envVars: buildContainerEnv(runtimeEnv)
       },
       cancellationOptions: {
         portReadyTimeoutMS: 90_000
