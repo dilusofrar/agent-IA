@@ -32,20 +32,7 @@ export class AgentIaPontoContainer extends Container {
   defaultPort = 8000;
   sleepAfter = "10m";
   pingEndpoint = "localhost/healthz";
-
-  override async fetch(request: Request): Promise<Response> {
-    const runtimeEnv = workerEnv as Env;
-    await this.startAndWaitForPorts({
-      ports: 8000,
-      startOptions: {
-        envVars: buildContainerEnv(runtimeEnv)
-      },
-      cancellationOptions: {
-        portReadyTimeoutMS: 90_000
-      }
-    });
-    return this.containerFetch(request);
-  }
+  envVars = buildContainerEnv(workerEnv as Env);
 }
 
 function compactEnv(values: Record<string, string | undefined>): Record<string, string> {
