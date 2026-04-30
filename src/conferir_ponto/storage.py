@@ -295,7 +295,17 @@ def storage_from_env(root_dir: Path) -> ReportStorage:
     secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
     region_name = os.getenv("R2_REGION", "auto").strip() or "auto"
 
-    if endpoint_url and bucket_name and access_key_id and secret_access_key:
+    missing = []
+    if not endpoint_url:
+        missing.append("R2_ENDPOINT_URL")
+    if not bucket_name:
+        missing.append("R2_BUCKET_NAME")
+    if not access_key_id:
+        missing.append("R2_ACCESS_KEY_ID")
+    if not secret_access_key:
+        missing.append("R2_SECRET_ACCESS_KEY")
+
+    if not missing:
         return R2ReportStorage(
             endpoint_url=endpoint_url,
             bucket_name=bucket_name,
@@ -303,13 +313,10 @@ def storage_from_env(root_dir: Path) -> ReportStorage:
             secret_access_key=secret_access_key,
             region_name=region_name,
         )
-    if endpoint_url.startswith("http://r2.binding") or endpoint_url.startswith("https://r2.binding"):
-        return CloudflareBindingReportStorage(
-            endpoint_url=endpoint_url,
-            bucket_name=bucket_name,
-        )
+
+    print(
+        "R2 S3 config incompleta. Variáveis ausentes: "
+        + ", ".join(missing)
+    )
+
     return LocalReportStorage(root_dir)
-
-
-def build_report_object_key(report_id: str, filename: str) -> str:
-    return f"reports/{report_id}/{filename}"
