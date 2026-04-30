@@ -81,7 +81,7 @@ function getNativeD1BaseUrl(env: Env): string | undefined {
 }
 
 function getNativeR2EndpointUrl(env: Env): string | undefined {
-  return getR2BindingName(env) ? `http://${D1_OUTBOUND_HOST}/r2` : env.R2_ENDPOINT_URL;
+  return getR2BindingName(env) ? `http://${D1_OUTBOUND_HOST}/query` : env.R2_ENDPOINT_URL;
 }
 
 function buildContainerEnv(env: Env): Record<string, string> {
@@ -141,54 +141,6 @@ AgentIaPontoContainer.outboundByHost = {
   [D1_OUTBOUND_HOST]: async (request, env) => {
     try {
       const url = new URL(request.url);
-      if (url.pathname === "/r2" || url.pathname.startsWith("/r2/")) {
-        const bucket = getR2Binding(env);
-        const key = decodeURIComponent(url.pathname.replace(/^\/r2\/?/, ""));
-        console.log("r2_outbound_request", {
-          method: request.method,
-          url: request.url,
-          key
-        });
-        if (!key) {
-          return new Response("Missing object key.", { status: 400 });
-        }
-
-        if (request.method === "PUT" || request.method === "POST") {
-          const body = await request.arrayBuffer();
-          await bucket.put(key, body, {
-            httpMetadata: request.headers.get("content-type")
-              ? { contentType: request.headers.get("content-type") ?? undefined }
-              : undefined
-          });
-          return new Response(null, { status: 204 });
-        }
-
-        if (request.method === "GET") {
-          const object = await bucket.get(key);
-          if (!object) {
-            return new Response(null, { status: 404 });
-          }
-          return new Response(object.body, {
-            status: 200,
-            headers: object.httpMetadata?.contentType
-              ? { "Content-Type": object.httpMetadata.contentType }
-              : undefined
-          });
-        }
-
-        if (request.method === "HEAD") {
-          const object = await bucket.head(key);
-          return new Response(null, { status: object ? 200 : 404 });
-        }
-
-        if (request.method === "DELETE") {
-          await bucket.delete(key);
-          return new Response(null, { status: 204 });
-        }
-
-        return new Response("Method Not Allowed", { status: 405 });
-      }
-
       if (request.method !== "POST") {
         return Response.json(
           { success: false, errors: [{ message: "Method Not Allowed" }] },
@@ -201,7 +153,75 @@ AgentIaPontoContainer.outboundByHost = {
           { status: 404 }
         );
       }
-      const payload = (await request.json()) as { sql?: string; params?: unknown[] };
+      const payload = (await request.json()) as
+        | { sql?: string; params?: unknown[] }
+        | {
+            __binding?: string;
+            operation?: string;
+            key?: string;
+            bodyBase64?: string;
+            contentType?: string;
+          };
+
+      if (payload && payload.__binding === "r2") {
+        const bucket = getR2Binding(env);
+        const operation = String(payload.operation ?? "").toLowerCase();
+        const key = String(payload.key ?? "");
+        console.log("r2_outbound_request", {
+          operation,
+          key,
+          url: request.url
+        });
+        if (!key) {
+          return Response.json(
+            { success: false, errors: [{ message: "Missing object key." }] },
+            { status: 400 }
+          );
+        }
+
+        if (operation === "put") {
+          const body = payload.bodyBase64 ? Uint8Array.from(atob(payload.bodyBase64), (char) => char.charCodeAt(0)) : new Uint8Array();
+          await bucket.put(key, body, {
+            httpMetadata: payload.contentType ? { contentType: payload.contentType } : undefined
+          });
+          return Response.json({ success: true });
+        }
+
+        if (operation === "get") {
+          const object = await bucket.get(key);
+          if (!object) {
+            return Response.json(
+              { success: false, errors: [{ message: "Not Found" }] },
+              { status: 404 }
+            );
+          }
+          const body = await object.arrayBuffer();
+          return Response.json({
+            success: true,
+            bodyBase64: btoa(String.fromCharCode(...new Uint8Array(body))),
+            contentType: object.httpMetadata?.contentType ?? null
+          });
+        }
+
+        if (operation === "head") {
+          const object = await bucket.head(key);
+          return Response.json(
+            { success: Boolean(object) },
+            { status: object ? 200 : 404 }
+          );
+        }
+
+        if (operation === "delete") {
+          await bucket.delete(key);
+          return Response.json({ success: true });
+        }
+
+        return Response.json(
+          { success: false, errors: [{ message: "Unsupported R2 operation." }] },
+          { status: 400 }
+        );
+      }
+
       const sql = String(payload.sql ?? "").trim();
       const params = Array.isArray(payload.params) ? payload.params : [];
       if (!sql) {

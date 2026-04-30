@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from base64 import b64decode, b64encode
 import os
 from pathlib import Path
 from time import time
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -200,37 +201,52 @@ class CloudflareBindingReportStorage:
         self.bucket_name = bucket_name
 
     def write_bytes(self, key: str, content: bytes) -> StoredObject:
-        request = Request(
-            self._url_for(key),
-            data=content,
-            headers={"Content-Type": "application/octet-stream"},
-            method="POST",
+        self._rpc(
+            {
+                "__binding": "r2",
+                "operation": "put",
+                "key": key,
+                "bodyBase64": b64encode(content).decode("ascii"),
+                "contentType": "application/octet-stream",
+            }
         )
-        self._open(request).read()
         return StoredObject(key=key, location=self._location_for(key))
 
     def read_bytes(self, key: str) -> bytes | None:
-        request = Request(self._url_for(key), method="GET")
-        try:
-            return self._open(request).read()
-        except HTTPError as exc:
-            if exc.code == 404:
-                return None
-            raise RuntimeError(f"R2 binding HTTP error {exc.code}: {exc.reason}") from exc
+        payload = self._rpc(
+            {
+                "__binding": "r2",
+                "operation": "get",
+                "key": key,
+            },
+            allow_not_found=True,
+        )
+        if payload is None:
+            return None
+        body_base64 = payload.get("bodyBase64")
+        if not body_base64:
+            return b""
+        return b64decode(body_base64)
 
     def delete(self, key: str) -> None:
-        request = Request(self._url_for(key), method="DELETE")
-        self._open(request).read()
+        self._rpc(
+            {
+                "__binding": "r2",
+                "operation": "delete",
+                "key": key,
+            }
+        )
 
     def exists(self, key: str) -> bool:
-        request = Request(self._url_for(key), method="HEAD")
-        try:
-            self._open(request).read()
-            return True
-        except HTTPError as exc:
-            if exc.code == 404:
-                return False
-            raise RuntimeError(f"R2 binding HTTP error {exc.code}: {exc.reason}") from exc
+        payload = self._rpc(
+            {
+                "__binding": "r2",
+                "operation": "head",
+                "key": key,
+            },
+            allow_not_found=True,
+        )
+        return bool(payload and payload.get("success"))
 
     def probe(self) -> dict[str, object]:
         probe_key = f"_storage_probe/{int(time())}-{uuid4().hex}.txt"
@@ -274,17 +290,24 @@ class CloudflareBindingReportStorage:
     def backend_name(self) -> str:
         return "r2"
 
-    def _url_for(self, key: str) -> str:
-        return f"{self.endpoint_url}/{quote(key.lstrip('/'), safe='/-._~')}"
-
     def _location_for(self, key: str) -> str:
         bucket = self.bucket_name or "binding"
         return f"r2://{bucket}/{key}"
 
-    def _open(self, request: Request):
+    def _rpc(self, payload: dict[str, object], *, allow_not_found: bool = False) -> dict[str, object] | None:
+        request = Request(
+            self.endpoint_url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
         try:
-            return urlopen(request, timeout=20)
+            with urlopen(request, timeout=20) as response:
+                raw = response.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
         except HTTPError as exc:
+            if allow_not_found and exc.code == 404:
+                return None
             body = exc.read().decode("utf-8", errors="replace")
             detail = body or exc.reason
             raise RuntimeError(f"R2 binding HTTP error {exc.code}: {detail}") from exc
