@@ -31,6 +31,19 @@ export class AgentIaPontoContainer extends Container {
   defaultPort = 8000;
   sleepAfter = "10m";
   pingEndpoint = "localhost/healthz";
+
+  override async fetch(request: Request, env: Env): Promise<Response> {
+    await this.startAndWaitForPorts({
+      ports: 8000,
+      startOptions: {
+        envVars: buildContainerEnv(env)
+      },
+      cancellationOptions: {
+        portReadyTimeoutMS: 90_000
+      }
+    });
+    return this.containerFetch(request);
+  }
 }
 
 function compactEnv(values: Record<string, string | undefined>): Record<string, string> {
@@ -136,20 +149,6 @@ function isD1ReadQuery(sql: string): boolean {
   return /^\s*(select|pragma|explain|with)\b/i.test(sql);
 }
 
-async function getPrimaryContainer(env: Env) {
-  const container = getContainer(env.APP_CONTAINER, PRIMARY_INSTANCE_NAME);
-  await container.startAndWaitForPorts({
-    ports: 8000,
-    startOptions: {
-      envVars: buildContainerEnv(env)
-    },
-    cancellationOptions: {
-      portReadyTimeoutMS: 90_000
-    }
-  });
-  return container;
-}
-
 AgentIaPontoContainer.outboundByHost = {
   [D1_OUTBOUND_HOST]: async (request, env) => {
     try {
@@ -244,7 +243,6 @@ AgentIaPontoContainer.outboundByHost = {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const container = await getPrimaryContainer(env);
-    return container.fetch(request);
+    return getContainer(env.APP_CONTAINER, PRIMARY_INSTANCE_NAME).fetch(request);
   }
 } satisfies ExportedHandler<Env>;
