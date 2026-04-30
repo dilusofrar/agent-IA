@@ -107,11 +107,10 @@ function buildContainerEnv(env: Env): Record<string, string> {
     D1_DATABASE_ID: useNativeD1Binding ? undefined : env.D1_DATABASE_ID,
     D1_API_TOKEN: useNativeD1Binding ? undefined : env.D1_API_TOKEN,
     D1_API_BASE_URL: getNativeD1BaseUrl(env),
-    R2_BINDING_NAME: r2BindingName,
-    R2_ENDPOINT_URL: getNativeR2EndpointUrl(env),
-    R2_BUCKET_NAME: env.R2_BUCKET_NAME,
-    R2_ACCESS_KEY_ID: useNativeR2Binding ? undefined : env.R2_ACCESS_KEY_ID,
-    R2_SECRET_ACCESS_KEY: useNativeR2Binding ? undefined : env.R2_SECRET_ACCESS_KEY,
+    R2_BINDING_NAME: undefined,
+    R2_ENDPOINT_URL: env.R2_ENDPOINT_URL,
+    R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID,
+    R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY,
     R2_REGION: env.R2_REGION ?? "auto"
   });
 }
