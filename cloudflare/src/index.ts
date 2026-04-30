@@ -86,14 +86,14 @@ function getNativeD1BaseUrl(env: Env): string | undefined {
 }
 
 function getNativeR2EndpointUrl(env: Env): string | undefined {
-  return getR2BindingName(env) ? `http://${R2_OUTBOUND_HOST}` : env.R2_ENDPOINT_URL;
+  return env.R2_ENDPOINT_URL;
 }
 
 function buildContainerEnv(env: Env): Record<string, string> {
   const d1BindingName = getD1BindingName(env);
   const r2BindingName = getR2BindingName(env);
   const useNativeD1Binding = Boolean(d1BindingName);
-  const useNativeR2Binding = Boolean(r2BindingName);
+  const useNativeR2Binding = false;
   return compactEnv({
     PORT: env.PORT ?? DEFAULT_CONTAINER_PORT,
     PYTHONPATH: env.PYTHONPATH ?? "/app/src",
