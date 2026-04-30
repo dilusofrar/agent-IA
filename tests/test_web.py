@@ -1298,7 +1298,7 @@ class WebHelpersTests(unittest.TestCase):
         with patch.dict(
             "os.environ",
             {
-                "R2_ENDPOINT_URL": "http://r2.binding",
+                "R2_ENDPOINT_URL": "http://cf-r2.internal",
                 "R2_BUCKET_NAME": "rendflare",
             },
             clear=False,

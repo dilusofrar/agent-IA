@@ -26,7 +26,7 @@ type Env = {
 const DEFAULT_CONTAINER_PORT = "8000";
 const PRIMARY_INSTANCE_NAME = "primary";
 const D1_OUTBOUND_HOST = "d1.binding";
-const R2_OUTBOUND_HOST = "r2.binding";
+const R2_OUTBOUND_HOST = "cf-r2.internal";
 
 export class AgentIaPontoContainer extends Container {
   defaultPort = 8000;
