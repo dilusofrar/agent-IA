@@ -157,6 +157,16 @@ class WebAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/login")
 
+    def test_main_page_redirects_to_login_when_session_lookup_fails(self):
+        client = TestClient(app)
+        client.cookies.set("agent_app_session", "operador:9999999999:assinatura")
+
+        with patch("conferir_ponto.web.load_user_by_username", side_effect=RuntimeError("D1 offline")):
+            response = client.get("/", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/login")
+
     def test_app_login_sets_session_cookie(self):
         client = TestClient(app)
 

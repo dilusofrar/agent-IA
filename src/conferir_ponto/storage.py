@@ -295,6 +295,12 @@ def storage_from_env(root_dir: Path) -> ReportStorage:
     secret_access_key = os.getenv("R2_SECRET_ACCESS_KEY", "").strip()
     region_name = os.getenv("R2_REGION", "auto").strip() or "auto"
 
+    if endpoint_url.startswith("http://r2.binding") or endpoint_url.startswith("https://r2.binding"):
+        return CloudflareBindingReportStorage(
+            endpoint_url=endpoint_url,
+            bucket_name=bucket_name,
+        )
+
     missing = []
     if not endpoint_url:
         missing.append("R2_ENDPOINT_URL")
@@ -320,3 +326,7 @@ def storage_from_env(root_dir: Path) -> ReportStorage:
     )
 
     return LocalReportStorage(root_dir)
+
+
+def build_report_object_key(report_id: str, filename: str) -> str:
+    return f"reports/{report_id}/{filename}"

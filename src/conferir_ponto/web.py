@@ -657,6 +657,28 @@ def get_admin_credentials() -> tuple[str, str]:
     )
 
 
+def safe_load_user_by_username(username: str, *, context: str) -> dict[str, Any] | None:
+    try:
+        return load_user_by_username(username)
+    except Exception as exc:
+        LOGGER.warning(
+            "user_lookup_failed",
+            extra={"username": username, "context": context, "error": str(exc)},
+        )
+        return None
+
+
+def safe_sync_admin_user_from_env() -> dict[str, Any] | None:
+    try:
+        return sync_admin_user_from_env()
+    except Exception as exc:
+        LOGGER.warning(
+            "admin_user_sync_failed",
+            extra={"error": str(exc)},
+        )
+        return None
+
+
 def sync_admin_user_from_env() -> dict[str, Any] | None:
     username, password = get_admin_credentials()
     if not password:
@@ -677,8 +699,8 @@ def sync_admin_user_from_env() -> dict[str, Any] | None:
 
 
 def authenticate_admin_user(username: str, password: str) -> dict[str, Any] | None:
-    sync_admin_user_from_env()
-    user = load_user_by_username(username)
+    safe_sync_admin_user_from_env()
+    user = safe_load_user_by_username(username, context="authenticate_admin_user")
     if user and user.get("isActive") and user.get("role") == "admin":
         if verify_password(password, user.get("passwordHash")):
             return user
@@ -698,8 +720,8 @@ def authenticate_admin_user(username: str, password: str) -> dict[str, Any] | No
 
 
 def authenticate_app_user(username: str, password: str) -> dict[str, Any] | None:
-    sync_admin_user_from_env()
-    user = load_user_by_username(username)
+    safe_sync_admin_user_from_env()
+    user = safe_load_user_by_username(username, context="authenticate_app_user")
     if user and user.get("isActive") and verify_password(password, user.get("passwordHash")):
         return user
     return None
@@ -715,7 +737,7 @@ def get_authenticated_admin_user(request: Request) -> dict[str, Any] | None:
         except ValueError:
             token_username = ""
         if token_username:
-            user = load_user_by_username(token_username)
+            user = safe_load_user_by_username(token_username, context="get_authenticated_admin_user")
             if user and user.get("isActive") and user.get("role") == "admin":
                 return user
             env_username, _ = get_admin_credentials()
@@ -743,7 +765,7 @@ def get_authenticated_app_user(request: Request) -> dict[str, Any] | None:
         token_username, _, _ = token.split(":", 2)
     except ValueError:
         return None
-    user = load_user_by_username(token_username)
+    user = safe_load_user_by_username(token_username, context="get_authenticated_app_user")
     if user and user.get("isActive"):
         return user
     return None
@@ -793,7 +815,7 @@ def create_app_session_token(username: str) -> str:
 
 
 def is_admin_authenticated(request: Request) -> bool:
-    sync_admin_user_from_env()
+    safe_sync_admin_user_from_env()
     username, password = get_admin_credentials()
     has_env_admin = bool(password)
     token = request.cookies.get(ADMIN_SESSION_COOKIE, "")
@@ -814,7 +836,7 @@ def is_admin_authenticated(request: Request) -> bool:
         return False
     if expires_at < int(datetime.now().timestamp()):
         return False
-    user = load_user_by_username(token_username)
+    user = safe_load_user_by_username(token_username, context="is_admin_authenticated")
     if user is not None:
         return bool(user.get("isActive")) and user.get("role") == "admin"
     if has_env_admin and hmac.compare_digest(token_username, username):
@@ -841,7 +863,7 @@ def is_app_authenticated(request: Request) -> bool:
         return False
     if expires_at < int(datetime.now().timestamp()):
         return False
-    user = load_user_by_username(token_username)
+    user = safe_load_user_by_username(token_username, context="is_app_authenticated")
     return bool(user and user.get("isActive"))
 
 
