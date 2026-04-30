@@ -232,6 +232,20 @@ AgentIaPontoContainer.outboundByHost = {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    return getContainer(env.APP_CONTAINER, PRIMARY_INSTANCE_NAME).fetch(request);
+    const response = await getContainer(env.APP_CONTAINER, PRIMARY_INSTANCE_NAME).fetch(request);
+    if (response.status >= 500) {
+      let bodyPreview = "";
+      try {
+        bodyPreview = (await response.clone().text()).slice(0, 2000);
+      } catch (error) {
+        bodyPreview = `unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      console.error("container_upstream_error", {
+        path: new URL(request.url).pathname,
+        status: response.status,
+        bodyPreview
+      });
+    }
+    return response;
   }
 } satisfies ExportedHandler<Env>;
